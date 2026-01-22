@@ -47,6 +47,31 @@ const performanceUtils = {
   }
 };
 
+// Debounce helper to prevent excessive UI updates
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// Debounced UI update functions
+const debouncedUpdateResults = debounce(async () => {
+    await updateHomeStats();
+    if (document.getElementById("results-page")?.classList.contains("active")) {
+        await loadResults();
+    }
+    const votesSection = document.getElementById("admin-votes");
+    if (votesSection && votesSection.classList.contains("active")) {
+        await loadAdminVotes();
+    }
+}, 1000); // Wait 1 second before re-rendering
+
 // Helper untuk render logo aman (Global) - OPTIMIZED
 const getLogoHtml = (() => {
   const orgMap = {
@@ -115,7 +140,7 @@ async function initSupabase() {
   }
 }
 
-// ===== SETUP REAL-TIME SUBSCRIPTIONS =====
+// ===== SETUP REAL-TIME SUBSCRIPTIONS - OPTIMIZED =====
 async function setupRealtimeSubscriptions() {
   try {
     // Subscribe ke perubahan pada tabel candidates
@@ -126,56 +151,58 @@ async function setupRealtimeSubscriptions() {
         { event: "*", schema: "public", table: "candidates" },
         async (payload) => {
           console.log("Perubahan data candidates:", payload);
-          await loadDataFromSupabase();
-          await updateHomeStats();
-          await loadQuickResults();
+          
+          if (payload.eventType === 'INSERT') {
+            candidates.push(payload.new);
+          } else if (payload.eventType === 'UPDATE') {
+            const index = candidates.findIndex(c => c.id === payload.new.id);
+            if (index !== -1) candidates[index] = payload.new;
+          } else if (payload.eventType === 'DELETE') {
+            candidates = candidates.filter(c => c.id !== payload.old.id);
+          }
 
+          debouncedUpdateResults();
+          
           // Refresh halaman jika sedang di halaman admin
-          if (
-            document.getElementById("admin-page").classList.contains("active")
-          ) {
+          if (document.getElementById("admin-page").classList.contains("active")) {
             await loadAdminCandidates();
           }
 
           // Refresh halaman jika sedang di halaman voting
-          if (
-            document.getElementById("vote-page").classList.contains("active")
-          ) {
+          if (document.getElementById("vote-page").classList.contains("active")) {
             await loadAllPaslon();
           }
         },
       )
       .subscribe();
 
-    // Subscribe ke perubahan pada tabel votes
+    // Subscribe ke perubahan pada tabel votes - CRITICAL OPTIMIZATION
     const votesChannel = supabase
       .channel("votes-changes")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "votes" },
+        { event: "INSERT", schema: "public", table: "votes" }, 
         async (payload) => {
-          console.log("Perubahan data votes:", payload);
-          await loadDataFromSupabase();
-          await updateHomeStats();
-          await loadQuickResults();
-
-          // Refresh halaman jika sedang di halaman results
-          if (
-            document.getElementById("results-page").classList.contains("active")
-          ) {
-            await loadResults();
-          }
-
-          // Refresh halaman jika sedang di halaman admin votes
-          const votesSection = document.getElementById("admin-votes");
-          if (votesSection && votesSection.classList.contains("active")) {
-            await loadAdminVotes();
-          }
+          console.log("Suara baru masuk:", payload.new.nama);
+          
+          // Update data lokal tanpa refetch seluruh tabel
+          votes.unshift(payload.new);
+          
+          // Trigger debounced UI updates
+          debouncedUpdateResults();
         },
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "votes" },
+        async (payload) => {
+           votes = votes.filter(v => v.id !== payload.old.id);
+           debouncedUpdateResults();
+        }
       )
       .subscribe();
 
-    console.log("✅ Real-time subscriptions aktif");
+    console.log("✅ Real-time subscriptions aktif (Optimized)");
   } catch (error) {
     console.error("❌ Error setting up real-time:", error);
   }
@@ -270,131 +297,77 @@ function updateNavButtons(activePage) {
   }
 }
 
-// 3. Load Data dari Supabase - DIPERBAIKI
+// 3. Load Data dari Supabase - OPTIMIZED WITH PARALLEL FETCHING
 async function loadDataFromSupabase() {
   try {
     performanceUtils.mark('loadDataStart');
     showLoading("Memuat data dari server...");
 
-    // Load candidates dengan polling
-    performanceUtils.mark('loadCandidatesStart');
-    const { data: candidatesData, error: candidatesError } = await supabase
-      .from("candidates")
-      .select("*")
-      .order("org", { ascending: true })
-      .order("created_at", { ascending: true });
-    performanceUtils.mark('loadCandidatesEnd');
-    performanceUtils.measure('loadCandidates', 'loadCandidatesStart', 'loadCandidatesEnd');
+    // Fetch SEMUA data secara paralel menggunakan Promise.all
+    // Ini jauh lebih cepat daripada await satu per satu (serial)
+    const [candidatesRes, votesRes, settingsRes, logosRes] = await Promise.all([
+      supabase.from("candidates").select("*").order("org", { ascending: true }).order("created_at", { ascending: true }),
+      supabase.from("votes").select("*").order("created_at", { ascending: false }),
+      supabase.from("settings").select("*"),
+      supabase.from("logos").select("*")
+    ]);
 
-    if (candidatesError) {
-      console.error("Error loading candidates:", candidatesError);
-      candidates = [];
-    } else {
-      candidates = candidatesData || [];
-      console.log(`Loaded ${candidates.length} candidates`);
+    // Error handling
+    if (candidatesRes.error) throw candidatesRes.error;
+    if (votesRes.error) throw votesRes.error;
+    
+    // Update data lokal
+    candidates = candidatesRes.data || [];
+    votes = votesRes.data || [];
+    
+    // Process settings
+    settings = {};
+    const settingsData = settingsRes.data || [];
+    for (let i = 0; i < settingsData.length; i++) {
+      const item = settingsData[i];
+      settings[item.key] = item.value;
     }
 
-    // Load votes dengan urutan yang benar
-    performanceUtils.mark('loadVotesStart');
-    const { data: votesData, error: votesError } = await supabase
-      .from("votes")
-      .select("*")
-      .order("kelas", { ascending: true }) // Urutkan berdasarkan kelas
-      .order("nama", { ascending: true }) // Urutkan berdasarkan nama
-      .order("created_at", { ascending: false });
-    performanceUtils.mark('loadVotesEnd');
-    performanceUtils.measure('loadVotes', 'loadVotesStart', 'loadVotesEnd');
-
-    if (votesError) {
-      console.error("Error loading votes:", votesError);
-      votes = [];
-    } else {
-      votes = votesData || [];
-      console.log(`Loaded ${votes.length} votes`);
-    }
-
-    // Load settings
-    performanceUtils.mark('loadSettingsStart');
-    const { data: settingsData, error: settingsError } = await supabase
-      .from("settings")
-      .select("*");
-
-    if (settingsError) {
-      console.error("Error loading settings:", settingsError);
-      settings = {};
-    } else {
-      settings = {};
-      // OPTIMIZED: Use for loop instead of forEach for better performance
-      for (let i = 0; i < settingsData.length; i++) {
-        const item = settingsData[i];
-        settings[item.key] = item.value;
-      }
-
-      // Update UI dengan settings
-      if (settings.website_title) {
-        document.title = settings.website_title;
-        const header = document.getElementById("website-header");
-        if (header) {
-          header.textContent = `🗳️ ${settings.website_title}`;
-        }
-      }
-
-      if (settings.school_name && settings.election_period) {
-        const schoolText = document.getElementById("school-info");
-        if (schoolText) {
-          schoolText.textContent = `${settings.school_name} | Periode ${settings.election_period}`;
-        }
+    // Update UI dengan settings
+    if (settings.website_title) {
+      document.title = settings.website_title;
+      const header = document.getElementById("website-header");
+      if (header) {
+        header.textContent = `🗳️ ${settings.website_title}`;
       }
     }
-    performanceUtils.mark('loadSettingsEnd');
-    performanceUtils.measure('loadSettings', 'loadSettingsStart', 'loadSettingsEnd');
 
-    // Load logos
-    performanceUtils.mark('loadLogosStart');
-    const { data: logosData, error: logosError } = await supabase
-      .from("logos")
-      .select("*");
-
-    if (logosError) {
-      console.error("Error loading logos:", logosError);
-      logos = {};
-    } else {
-      logos = {};
-      // OPTIMIZED: Use for loop instead of forEach for better performance
-      for (let i = 0; i < logosData.length; i++) {
-        const logo = logosData[i];
-        logos[logo.org] = logo.logo_url;
-      }
-
-      // Update logo previews di admin
-      updateLogoPreviews();
-
-      // Update logo sekolah di header (jika ada)
-      if (logos["school"]) {
-        const headerLogo = document.querySelector(".logo-container img");
-        if (headerLogo) {
-          headerLogo.src = logos["school"];
-          // Pastikan style aman
-          headerLogo.style.objectFit = "cover";
-        }
+    if (settings.school_name && settings.election_period) {
+      const schoolText = document.getElementById("school-info");
+      if (schoolText) {
+        schoolText.textContent = `${settings.school_name} | Periode ${settings.election_period}`;
       }
     }
-    performanceUtils.mark('loadLogosEnd');
-    performanceUtils.measure('loadLogos', 'loadLogosStart', 'loadLogosEnd');
+
+    // Process logos
+    logos = {};
+    const logosData = logosRes.data || [];
+    for (let i = 0; i < logosData.length; i++) {
+      const logo = logosData[i];
+      logos[logo.org] = logo.logo_url;
+    }
+
+    // Update previews
+    updateLogoPreviews();
+
+    if (logos["school"]) {
+      const headerLogo = document.querySelector(".logo-container img");
+      if (headerLogo) {
+        headerLogo.src = logos["school"];
+        headerLogo.style.objectFit = "cover";
+      }
+    }
 
     performanceUtils.mark('loadDataEnd');
     performanceUtils.measure('loadDataTotal', 'loadDataStart', 'loadDataEnd');
 
-    console.log(
-      `✅ Data dimuat: ${candidates.length} paslon, ${votes.length} suara`,
-    );
-
-    // Log performance metrics
-    performanceUtils.logMeasure('loadCandidates', '(candidates)');
-    performanceUtils.logMeasure('loadVotes', '(votes)');
-    performanceUtils.logMeasure('loadSettings', '(settings)');
-    performanceUtils.logMeasure('loadLogos', '(logos)');
-    performanceUtils.logMeasure('loadDataTotal', '(total)');
+    console.log(`✅ Data dimuat paralel: ${candidates.length} paslon, ${votes.length} suara`);
+    performanceUtils.logMeasure('loadDataTotal', '(parallel total)');
 
     hideLoading();
   } catch (error) {
@@ -427,27 +400,29 @@ async function updateHomeStats() {
   }
 }
 
-// 5. Load Hasil Cepat
+// 5. Load Hasil Cepat - OPTIMIZED
 async function loadQuickResults() {
   const container = document.getElementById("quick-results");
   if (!container) return;
 
-  // Hitung suara per paslon - OPTIMIZED
-  const voteCounts = {};
+  // Pre-calculate valid votes count once
+  const validVotesArray = votes.filter(v => v.status === "voted");
+  const totalValidVotes = validVotesArray.length;
 
-  // OPTIMIZED: Use for loop instead of forEach for better performance
-  for (let i = 0; i < votes.length; i++) {
-    const vote = votes[i];
-    if (vote.selected_paslon && vote.status === "voted") {
+  // Hitung suara per paslon dari array votes lokal
+  const voteCounts = {};
+  for (let i = 0; i < validVotesArray.length; i++) {
+    const vote = validVotesArray[i];
+    if (vote.selected_paslon) {
       try {
-        const paslonObj =
-          typeof vote.selected_paslon === "string"
+        const paslonObj = typeof vote.selected_paslon === "string"
             ? JSON.parse(vote.selected_paslon)
             : vote.selected_paslon;
 
-        // OPTIMIZED: Use for...of instead of Object.values().forEach()
         for (const paslonId of Object.values(paslonObj)) {
-          voteCounts[paslonId] = (voteCounts[paslonId] || 0) + 1;
+          if (paslonId) {
+            voteCounts[paslonId] = (voteCounts[paslonId] || 0) + 1;
+          }
         }
       } catch (e) {
         console.error("Error parsing selected_paslon:", e);
@@ -455,15 +430,14 @@ async function loadQuickResults() {
     }
   }
 
-  // Update vote count di paslon - OPTIMIZED
+  // Update vote count di paslon lokal (untuk referensi UI)
   for (let i = 0; i < candidates.length; i++) {
     const paslon = candidates[i];
     paslon.votes = voteCounts[paslon.id] || 0;
   }
 
-  // Kelompokkan berdasarkan organisasi - OPTIMIZED
+  // Kelompokkan berdasarkan organisasi
   const resultsByOrg = { best: [], dps: [], pmr: [] };
-
   for (let i = 0; i < candidates.length; i++) {
     const paslon = candidates[i];
     if (paslon.status === "active" && resultsByOrg[paslon.org]) {
@@ -471,7 +445,6 @@ async function loadQuickResults() {
     }
   }
 
-  // Cache DOM elements to avoid repeated queries during rendering
   const orgMap = {
     best: { name: "BEST", color: "var(--purple)" },
     dps: { name: "DPS", color: "var(--orange)" },
@@ -479,19 +452,14 @@ async function loadQuickResults() {
   };
 
   let html = "";
-
-  // OPTIMIZED: Use for...of instead of Object.entries().forEach()
   for (const [org, orgCandidates] of Object.entries(resultsByOrg)) {
     if (orgCandidates.length === 0) continue;
 
     const orgInfo = orgMap[org];
     const orgName = orgInfo.name;
     const orgColor = orgInfo.color;
-
-    // Ambil logo organisasi
     const orgLogo = logos[org];
 
-    // Sort by votes - OPTIMIZED
     orgCandidates.sort((a, b) => b.votes - a.votes);
 
     html += `
@@ -502,12 +470,9 @@ async function loadQuickResults() {
                     </div>
             `;
 
-    // OPTIMIZED: Use for loop instead of forEach
     for (let i = 0; i < orgCandidates.length; i++) {
       const paslon = orgCandidates[i];
-      // OPTIMIZED: Calculate total votes once and reuse
-      const totalVotes = votes.filter((v) => v.status === "voted").length;
-      const percentage = totalVotes > 0 ? Math.round((paslon.votes / totalVotes) * 100) : 0;
+      const percentage = totalValidVotes > 0 ? Math.round((paslon.votes / totalValidVotes) * 100) : 0;
 
       html += `
                     <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 10px;">
@@ -521,7 +486,6 @@ async function loadQuickResults() {
                     </div>
                 `;
     }
-
     html += `</div>`;
   }
 
@@ -884,7 +848,7 @@ function updateSubmitButton() {
   }
 }
 
-// 10. Submit Vote ke Supabase - DIPERBAIKI
+// 10. Submit Vote ke Supabase - OPTIMIZED
 async function submitVote() {
   console.log("Submitting vote...");
 
@@ -915,7 +879,7 @@ async function submitVote() {
     return;
   }
 
-  // Cek apakah sudah voting
+  // Cek apakah sudah voting - Gunakan array lokal untuk performa
   const alreadyVoted = votes.some(
     (vote) =>
       vote.nama.toLowerCase() === voterName.toLowerCase() &&
@@ -947,7 +911,7 @@ async function submitVote() {
   showLoading("Mengirim suara Anda ke server...");
 
   try {
-    // 1. Simpan vote ke Supabase (CRITICAL)
+    // 1. Simpan vote ke Supabase
     const { data, error } = await supabase
       .from("votes")
       .insert([
@@ -962,27 +926,10 @@ async function submitVote() {
 
     if (error) throw error;
 
-    // 2. Update vote count (NON-BLOCKING / PARALLEL)
-    // Kita gunakan Promise.all agar lebih cepat, dan tidak membatalkan vote jika ini gagal sebagian
-    const updatePromises = Object.entries(selectedPaslon).map(
-      async ([org, paslonId]) => {
-        const paslon = candidates.find((c) => c.id === paslonId);
-        if (paslon) {
-          const newVoteCount = (paslon.votes || 0) + 1;
-          return supabase
-            .from("candidates")
-            .update({ votes: newVoteCount })
-            .eq("id", paslonId);
-        }
-      },
-    );
-
-    // Tunggu semua update selesai (opsional: bisa di-await atau dibiarkan background jika ingin sangat cepat)
-    // Kita await tapi dengan catch individual agar tidak throw error ke main block
-    await Promise.all(updatePromises).catch((err) =>
-      console.warn("Warning: Gagal update counter paslon", err),
-    );
-
+    // OPTIMIZATION: Kita tidak perlu lagi mengupdate kolom 'votes' di tabel 'candidates' 
+    // karena loadQuickResults sekarang menghitung suara langsung dari baris di tabel 'votes'.
+    // Ini menghilangkan 3 write requests per satu kali voting!
+    
     // Sembunyikan loading
     hideLoading();
 
@@ -1009,7 +956,6 @@ async function submitVote() {
       "❌ Gagal menyimpan suara: " + (error.message || "Koneksi bermasalah"),
     );
 
-    // Enable tombol lagi jika gagal
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = "✅ Kirim Semua Suara (3/3 dipilih)";
@@ -1054,9 +1000,8 @@ async function skipVote() {
 
     if (error) throw error;
 
-    // Refresh data
-    await loadDataFromSupabase();
-
+    // Realtime subscription akan mengupdate data secara otomatis
+    
     hideLoading();
     resetVoteForm();
     showMessage(
