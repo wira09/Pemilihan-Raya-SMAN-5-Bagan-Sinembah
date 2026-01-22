@@ -19,99 +19,40 @@ let selectedPaslon = {};
 let settings = {};
 let logos = {};
 
-// Performance monitoring utilities
-const performanceUtils = {
-  marks: {},
-  measures: {},
+// Helper untuk render logo aman (Global)
+const getLogoHtml = (logo, org, size = "50px") => {
+  const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
+  const orgColor =
+    org === "best"
+      ? "var(--purple)"
+      : org === "dps"
+        ? "var(--orange)"
+        : "var(--pink)";
 
-  mark(name) {
-    this.marks[name] = performance.now();
-  },
+  if (!logo) {
+    const icon = org === "best" ? "👑" : org === "dps" ? "⚖️" : "❤️";
+    return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: ${orgColor}; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">${icon}</div>`;
+  }
 
-  measure(name, startMark, endMark) {
-    const startTime = this.marks[startMark];
-    const endTime = this.marks[endMark] || performance.now();
-    this.measures[name] = endTime - startTime;
-    return this.measures[name];
-  },
+  // Jika logo adalah URL (http/data:image)
+  if (logo.startsWith("http") || logo.startsWith("data:image")) {
+    return `<img src="${logo}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
+  }
 
-  getMeasure(name) {
-    return this.measures[name];
-  },
-
-  logMeasure(name, description = '') {
-    const duration = this.measures[name];
-    if (duration !== undefined) {
-      console.log(`⏱️ ${name}: ${duration.toFixed(2)}ms ${description}`);
+  // Jika logo adalah raw SVG string yang belum ter-encode
+  if (logo.trim().startsWith("<svg")) {
+    try {
+      const encodedSvg = "data:image/svg+xml;base64," + btoa(logo);
+      return `<img src="${encodedSvg}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
+    } catch (e) {
+      console.error("Error encoding SVG:", e);
+      return `<div style="width: ${size}; height: ${size}; background: #eee; border-radius: 50%; display:flex; align-items:center; justify-content:center;">Error</div>`;
     }
   }
+
+  // Fallback
+  return `<img src="${logo}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
 };
-
-// Debounce helper to prevent excessive UI updates
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
-
-// Debounced UI update functions
-const debouncedUpdateResults = debounce(async () => {
-    await updateHomeStats();
-    if (document.getElementById("results-page")?.classList.contains("active")) {
-        await loadResults();
-    }
-    const votesSection = document.getElementById("admin-votes");
-    if (votesSection && votesSection.classList.contains("active")) {
-        await loadAdminVotes();
-    }
-}, 1000); // Wait 1 second before re-rendering
-
-// Helper untuk render logo aman (Global) - OPTIMIZED
-const getLogoHtml = (() => {
-  const orgMap = {
-    best: { name: "BEST", color: "var(--purple)", icon: "👑" },
-    dps: { name: "DPS", color: "var(--orange)", icon: "⚖️" },
-    pmr: { name: "PMR", color: "var(--pink)", icon: "❤️" }
-  };
-
-  return (logo, org, size = "50px") => {
-    const orgInfo = orgMap[org];
-    if (!orgInfo) {
-      return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: #ccc; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">?</div>`;
-    }
-
-    const { name, color, icon } = orgInfo;
-
-    if (!logo) {
-      return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: ${color}; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">${icon}</div>`;
-    }
-
-    // Jika logo adalah URL (http/data:image)
-    if (logo.startsWith("http") || logo.startsWith("data:image")) {
-      return `<img src="${logo}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
-    }
-
-    // Jika logo adalah raw SVG string yang belum ter-encode
-    if (logo.trim().startsWith("<svg")) {
-      try {
-        const encodedSvg = "data:image/svg+xml;base64," + btoa(logo);
-        return `<img src="${encodedSvg}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
-      } catch (e) {
-        console.error("Error encoding SVG:", e);
-        return `<div style="width: ${size}; height: ${size}; background: #eee; border-radius: 50%; display:flex; align-items:center; justify-content:center;">Error</div>`;
-      }
-    }
-
-    // Fallback
-    return `<img src="${logo}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
-  };
-})();
 
 // ===== INISIALISASI SUPABASE DENGAN REAL-TIME =====
 async function initSupabase() {
@@ -140,7 +81,7 @@ async function initSupabase() {
   }
 }
 
-// ===== SETUP REAL-TIME SUBSCRIPTIONS - OPTIMIZED =====
+// ===== SETUP REAL-TIME SUBSCRIPTIONS =====
 async function setupRealtimeSubscriptions() {
   try {
     // Subscribe ke perubahan pada tabel candidates
@@ -151,58 +92,56 @@ async function setupRealtimeSubscriptions() {
         { event: "*", schema: "public", table: "candidates" },
         async (payload) => {
           console.log("Perubahan data candidates:", payload);
-          
-          if (payload.eventType === 'INSERT') {
-            candidates.push(payload.new);
-          } else if (payload.eventType === 'UPDATE') {
-            const index = candidates.findIndex(c => c.id === payload.new.id);
-            if (index !== -1) candidates[index] = payload.new;
-          } else if (payload.eventType === 'DELETE') {
-            candidates = candidates.filter(c => c.id !== payload.old.id);
-          }
+          await loadDataFromSupabase();
+          await updateHomeStats();
+          await loadQuickResults();
 
-          debouncedUpdateResults();
-          
           // Refresh halaman jika sedang di halaman admin
-          if (document.getElementById("admin-page").classList.contains("active")) {
+          if (
+            document.getElementById("admin-page").classList.contains("active")
+          ) {
             await loadAdminCandidates();
           }
 
           // Refresh halaman jika sedang di halaman voting
-          if (document.getElementById("vote-page").classList.contains("active")) {
+          if (
+            document.getElementById("vote-page").classList.contains("active")
+          ) {
             await loadAllPaslon();
           }
         },
       )
       .subscribe();
 
-    // Subscribe ke perubahan pada tabel votes - CRITICAL OPTIMIZATION
+    // Subscribe ke perubahan pada tabel votes
     const votesChannel = supabase
       .channel("votes-changes")
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "votes" }, 
+        { event: "*", schema: "public", table: "votes" },
         async (payload) => {
-          console.log("Suara baru masuk:", payload.new.nama);
-          
-          // Update data lokal tanpa refetch seluruh tabel
-          votes.unshift(payload.new);
-          
-          // Trigger debounced UI updates
-          debouncedUpdateResults();
+          console.log("Perubahan data votes:", payload);
+          await loadDataFromSupabase();
+          await updateHomeStats();
+          await loadQuickResults();
+
+          // Refresh halaman jika sedang di halaman results
+          if (
+            document.getElementById("results-page").classList.contains("active")
+          ) {
+            await loadResults();
+          }
+
+          // Refresh halaman jika sedang di halaman admin votes
+          const votesSection = document.getElementById("admin-votes");
+          if (votesSection && votesSection.classList.contains("active")) {
+            await loadAdminVotes();
+          }
         },
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "votes" },
-        async (payload) => {
-           votes = votes.filter(v => v.id !== payload.old.id);
-           debouncedUpdateResults();
-        }
       )
       .subscribe();
 
-    console.log("✅ Real-time subscriptions aktif (Optimized)");
+    console.log("✅ Real-time subscriptions aktif");
   } catch (error) {
     console.error("❌ Error setting up real-time:", error);
   }
@@ -232,11 +171,7 @@ async function showPage(pageId) {
         break;
       case "vote-page":
         if (typeof resetVoteForm === "function") resetVoteForm();
-        // Lazy load photos first if needed
-        showLoading("Menyiapkan formulir...");
-        await ensureCandidatePhotos();
         await loadAllPaslon();
-        hideLoading();
         break;
       case "results-page":
         await loadResults();
@@ -301,132 +236,109 @@ function updateNavButtons(activePage) {
   }
 }
 
-// 3. Load Data dari Supabase - OPTIMIZED & RESILIENT
+// 3. Load Data dari Supabase - DIPERBAIKI
 async function loadDataFromSupabase() {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000); // Increase to 30s for slow connections
-
   try {
-    performanceUtils.mark('loadDataStart');
-    showLoading("Menghubungkan ke database...");
+    showLoading("Memuat data dari server...");
 
-    console.log("📥 Mengambil data dari Supabase...");
-    
-    // Fetch SEMUA data secara paralel
-    // Kita gunakan '*' tapi tetap pastikan data yang diambil adalah yang terbaru
-    const [candidatesRes, votesRes, settingsRes, logosRes] = await Promise.all([
-      supabase.from("candidates").select("id, ketua, wakil, org, status, created_at, visi, misi, votes").order("org", { ascending: true }),
-      supabase.from("votes").select("id, status, selected_paslon, created_at").order("created_at", { ascending: false }),
-      supabase.from("settings").select("*"),
-      supabase.from("logos").select("*")
-    ]);
+    // Load candidates dengan polling
+    const { data: candidatesData, error: candidatesError } = await supabase
+      .from("candidates")
+      .select("*")
+      .order("org", { ascending: true })
+      .order("created_at", { ascending: true });
 
-    clearTimeout(timeoutId);
-
-    // Detailed Error Reporting
-    if (candidatesRes.error) {
-        console.error("Candidates fetch error:", candidatesRes.error);
-        throw new Error(`Gagal memuat paslon: ${candidatesRes.error.message}`);
+    if (candidatesError) {
+      console.error("Error loading candidates:", candidatesError);
+      candidates = [];
+    } else {
+      candidates = candidatesData || [];
+      console.log(`Loaded ${candidates.length} candidates`);
     }
-    if (votesRes.error) {
-        console.error("Votes fetch error:", votesRes.error);
-        throw new Error(`Gagal memuat data suara: ${votesRes.error.message}`);
-    }
-    
-    // Update data lokal
-    candidates = candidatesRes.data || [];
-    votes = votesRes.data || [];
-    
-    console.log(`✅ Berhasil menarik ${candidates.length} paslon & ${votes.length} suara.`);
 
-    // Process settings
-    settings = {};
-    const settingsData = settingsRes.data || [];
-    for (let i = 0; i < settingsData.length; i++) {
-        const item = settingsData[i];
+    // Load votes dengan urutan yang benar
+    const { data: votesData, error: votesError } = await supabase
+      .from("votes")
+      .select("*")
+      .order("kelas", { ascending: true }) // Urutkan berdasarkan kelas
+      .order("nama", { ascending: true }) // Urutkan berdasarkan nama
+      .order("created_at", { ascending: false });
+
+    if (votesError) {
+      console.error("Error loading votes:", votesError);
+      votes = [];
+    } else {
+      votes = votesData || [];
+      console.log(`Loaded ${votes.length} votes`);
+    }
+
+    // Load settings
+    const { data: settingsData, error: settingsError } = await supabase
+      .from("settings")
+      .select("*");
+
+    if (settingsError) {
+      console.error("Error loading settings:", settingsError);
+      settings = {};
+    } else {
+      settings = {};
+      settingsData.forEach((item) => {
         settings[item.key] = item.value;
-    }
+      });
 
-    // Update UI dengan settings
-    if (settings.website_title) {
+      // Update UI dengan settings
+      if (settings.website_title) {
         document.title = settings.website_title;
         const header = document.getElementById("website-header");
-        if (header) header.textContent = `🗳️ ${settings.website_title}`;
-    }
+        if (header) {
+          header.textContent = `🗳️ ${settings.website_title}`;
+        }
+      }
 
-    if (settings.school_name && settings.election_period) {
+      if (settings.school_name && settings.election_period) {
         const schoolText = document.getElementById("school-info");
-        if (schoolText) schoolText.textContent = `${settings.school_name} | Periode ${settings.election_period}`;
+        if (schoolText) {
+          schoolText.textContent = `${settings.school_name} | Periode ${settings.election_period}`;
+        }
+      }
     }
 
-    // Process logos
-    logos = {};
-    const logosData = logosRes.data || [];
-    for (let i = 0; i < logosData.length; i++) {
-        const logo = logosData[i];
+    // Load logos
+    const { data: logosData, error: logosError } = await supabase
+      .from("logos")
+      .select("*");
+
+    if (logosError) {
+      console.error("Error loading logos:", logosError);
+      logos = {};
+    } else {
+      logos = {};
+      logosData.forEach((logo) => {
         logos[logo.org] = logo.logo_url;
-    }
+      });
 
-    updateLogoPreviews();
+      // Update logo previews di admin
+      updateLogoPreviews();
 
-    if (logos["school"]) {
+      // Update logo sekolah di header (jika ada)
+      if (logos["school"]) {
         const headerLogo = document.querySelector(".logo-container img");
         if (headerLogo) {
-            headerLogo.src = logos["school"];
-            headerLogo.style.objectFit = "cover";
+          headerLogo.src = logos["school"];
+          // Pastikan style aman
+          headerLogo.style.objectFit = "cover";
         }
+      }
     }
 
-    performanceUtils.mark('loadDataEnd');
-    performanceUtils.measure('loadDataTotal', 'loadDataStart', 'loadDataEnd');
-    performanceUtils.logMeasure('loadDataTotal', '(parallel total)');
-
+    console.log(
+      `✅ Data dimuat: ${candidates.length} paslon, ${votes.length} suara`,
+    );
     hideLoading();
   } catch (error) {
-    clearTimeout(timeoutId);
-    console.error("❌ Critical error loading data:", error);
+    console.error("❌ Error loading data:", error);
     hideLoading();
-    
-    let userMessage = error.message || "Masalah koneksi tidak diketahui.";
-    if (error.name === 'AbortError') {
-        userMessage = "Koneksi terlalu lambat (Timeout 30 detik). Silakan hubungi admin atau coba lagi.";
-    }
-
-    showAlert(`Gagal Memuat Data: \n${userMessage}`);
-    
-    // Fallback ke beranda
-    showPage("home-page");
-  }
-}
-
-// 3.5. Fetch Candidate Photos (Lazy Loading)
-async function ensureCandidatePhotos() {
-  // Cek apakah ada paslon yang belum punya foto/visi/misi
-  const needsFetch = candidates.some(c => c.status === "active" && !c.foto && !c.visi);
-  
-  if (!needsFetch) return;
-
-  try {
-    console.log("📥 Mendownload foto paslon (lazy load)...");
-    const { data, error } = await supabase
-      .from("candidates")
-      .select("id, foto, visi, misi");
-    
-    if (error) throw error;
-
-    // Update data lokal
-    data.forEach(item => {
-      const idx = candidates.findIndex(c => c.id === item.id);
-      if (idx !== -1) {
-        candidates[idx].foto = item.foto;
-        candidates[idx].visi = item.visi;
-        candidates[idx].misi = item.misi;
-      }
-    });
-    
-    console.log("✅ Foto paslon berhasil dimuat.");
-  } catch (err) {
-    console.error("Gagal load foto paslon:", err);
+    showAlert("Error: Gagal memuat data dari server. Cek koneksi internet.");
   }
 }
 
@@ -453,66 +365,64 @@ async function updateHomeStats() {
   }
 }
 
-// 5. Load Hasil Cepat - OPTIMIZED
+// 5. Load Hasil Cepat
 async function loadQuickResults() {
   const container = document.getElementById("quick-results");
   if (!container) return;
 
-  // Pre-calculate valid votes count once
-  const validVotesArray = votes.filter(v => v.status === "voted");
-  const totalValidVotes = validVotesArray.length;
-
-  // Hitung suara per paslon dari array votes lokal
+  // Hitung suara per paslon
   const voteCounts = {};
-  for (let i = 0; i < validVotesArray.length; i++) {
-    const vote = validVotesArray[i];
-    if (vote.selected_paslon) {
+  votes.forEach((vote) => {
+    if (vote.selected_paslon && vote.status === "voted") {
       try {
-        const paslonObj = typeof vote.selected_paslon === "string"
+        const paslonObj =
+          typeof vote.selected_paslon === "string"
             ? JSON.parse(vote.selected_paslon)
             : vote.selected_paslon;
-
-        for (const paslonId of Object.values(paslonObj)) {
-          if (paslonId) {
-            voteCounts[paslonId] = (voteCounts[paslonId] || 0) + 1;
-          }
-        }
+        Object.values(paslonObj).forEach((paslonId) => {
+          voteCounts[paslonId] = (voteCounts[paslonId] || 0) + 1;
+        });
       } catch (e) {
         console.error("Error parsing selected_paslon:", e);
       }
     }
-  }
+  });
 
-  // Update vote count di paslon lokal (untuk referensi UI)
-  for (let i = 0; i < candidates.length; i++) {
-    const paslon = candidates[i];
+  // Update vote count di paslon
+  candidates.forEach((paslon) => {
     paslon.votes = voteCounts[paslon.id] || 0;
-  }
+  });
 
   // Kelompokkan berdasarkan organisasi
-  const resultsByOrg = { best: [], dps: [], pmr: [] };
-  for (let i = 0; i < candidates.length; i++) {
-    const paslon = candidates[i];
-    if (paslon.status === "active" && resultsByOrg[paslon.org]) {
-      resultsByOrg[paslon.org].push(paslon);
-    }
-  }
-
-  const orgMap = {
-    best: { name: "BEST", color: "var(--purple)" },
-    dps: { name: "DPS", color: "var(--orange)" },
-    pmr: { name: "PMR", color: "var(--pink)" }
+  const resultsByOrg = {
+    best: [],
+    dps: [],
+    pmr: [],
   };
 
-  let html = "";
-  for (const [org, orgCandidates] of Object.entries(resultsByOrg)) {
-    if (orgCandidates.length === 0) continue;
+  candidates.forEach((paslon) => {
+    if (paslon.status === "active") {
+      resultsByOrg[paslon.org].push(paslon);
+    }
+  });
 
-    const orgInfo = orgMap[org];
-    const orgName = orgInfo.name;
-    const orgColor = orgInfo.color;
+  let html = "";
+
+  Object.entries(resultsByOrg).forEach(([org, orgCandidates]) => {
+    if (orgCandidates.length === 0) return;
+
+    const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
+    const orgColor =
+      org === "best"
+        ? "var(--purple)"
+        : org === "dps"
+          ? "var(--orange)"
+          : "var(--pink)";
+
+    // Ambil logo organisasi
     const orgLogo = logos[org];
 
+    // Sort by votes
     orgCandidates.sort((a, b) => b.votes - a.votes);
 
     html += `
@@ -523,9 +433,10 @@ async function loadQuickResults() {
                     </div>
             `;
 
-    for (let i = 0; i < orgCandidates.length; i++) {
-      const paslon = orgCandidates[i];
-      const percentage = totalValidVotes > 0 ? Math.round((paslon.votes / totalValidVotes) * 100) : 0;
+    orgCandidates.forEach((paslon) => {
+      const totalVotes = votes.filter((v) => v.status === "voted").length;
+      const percentage =
+        totalVotes > 0 ? Math.round((paslon.votes / totalVotes) * 100) : 0;
 
       html += `
                     <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 10px;">
@@ -538,9 +449,10 @@ async function loadQuickResults() {
                         </div>
                     </div>
                 `;
-    }
+    });
+
     html += `</div>`;
-  }
+  });
 
   container.innerHTML = html || "<p>Belum ada data hasil.</p>";
 }
@@ -549,44 +461,37 @@ async function loadQuickResults() {
 function setupEventListeners() {
   console.log("Setting up event listeners...");
 
-  // Cache DOM elements to avoid repeated queries
-  const elements = {
-    homeBtn: document.getElementById("btn-home"),
-    voteBtn: document.getElementById("btn-vote"),
-    resultsBtn: document.getElementById("btn-results"),
-    adminBtn: document.getElementById("btn-admin"),
-    backVoteBtn: document.getElementById("btn-back-vote"),
-    backResultsBtn: document.getElementById("btn-back-results"),
-    backLoginBtn: document.getElementById("btn-back-login")
-  };
-
   // Navigasi utama - DIPERBAIKI
-  if (elements.homeBtn) {
-    elements.homeBtn.addEventListener("click", function (e) {
+  const homeBtn = document.getElementById("btn-home");
+  if (homeBtn) {
+    homeBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Home button clicked");
       showPage("home-page");
     });
   }
 
-  if (elements.voteBtn) {
-    elements.voteBtn.addEventListener("click", function (e) {
+  const voteBtn = document.getElementById("btn-vote");
+  if (voteBtn) {
+    voteBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Vote button clicked");
       showPage("vote-page");
     });
   }
 
-  if (elements.resultsBtn) {
-    elements.resultsBtn.addEventListener("click", function (e) {
+  const resultsBtn = document.getElementById("btn-results");
+  if (resultsBtn) {
+    resultsBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Results button clicked");
       showPage("results-page");
     });
   }
 
-  if (elements.adminBtn) {
-    elements.adminBtn.addEventListener("click", function (e) {
+  const adminBtn = document.getElementById("btn-admin");
+  if (adminBtn) {
+    adminBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Admin button clicked");
       if (currentUser && currentUser.role === "admin") {
@@ -598,22 +503,25 @@ function setupEventListeners() {
   }
 
   // Tombol kembali
-  if (elements.backVoteBtn) {
-    elements.backVoteBtn.addEventListener("click", function (e) {
+  const backVoteBtn = document.getElementById("btn-back-vote");
+  if (backVoteBtn) {
+    backVoteBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
   }
 
-  if (elements.backResultsBtn) {
-    elements.backResultsBtn.addEventListener("click", function (e) {
+  const backResultsBtn = document.getElementById("btn-back-results");
+  if (backResultsBtn) {
+    backResultsBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
   }
 
-  if (elements.backLoginBtn) {
-    elements.backLoginBtn.addEventListener("click", function (e) {
+  const backLoginBtn = document.getElementById("btn-back-login");
+  if (backLoginBtn) {
+    backLoginBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
@@ -626,67 +534,49 @@ function setupEventListeners() {
 function setupVotingSystem() {
   console.log("Setting up voting system...");
 
-  // Cache DOM elements to avoid repeated queries
-  const elements = {
-    classOptions: document.querySelectorAll(".class-option"),
-    selectedClassInput: document.getElementById("selected-class"),
-    voterNameInput: document.getElementById("voter-name"),
-    submitBtn: document.getElementById("btn-submit-vote"),
-    skipBtn: document.getElementById("btn-skip-vote")
-  };
+  // Pilihan Kelas
+  const classOptions = document.querySelectorAll(".class-option");
+  classOptions.forEach((option) => {
+    option.addEventListener("click", function () {
+      console.log("Class option clicked:", this.getAttribute("data-value"));
+      document.querySelectorAll(".class-option").forEach((opt) => {
+        opt.classList.remove("selected");
+      });
+      this.classList.add("selected");
+      selectedClass = this.getAttribute("data-value");
+      document.getElementById("selected-class").value = selectedClass;
 
-  // Pilihan Kelas - OPTIMIZED with event delegation
-  if (elements.classOptions.length > 0) {
-    // Use event delegation to handle clicks on class options
-    const classOptionsContainer = elements.classOptions[0].parentElement;
-    classOptionsContainer.addEventListener("click", function(e) {
-      if (e.target.classList.contains("class-option")) {
-        // Remove selected class from all options
-        elements.classOptions.forEach(opt => opt.classList.remove("selected"));
+      // Tampilkan tombol submit jika nama sudah diisi
+      const voterName = document.getElementById("voter-name").value.trim();
+      if (voterName && selectedClass) {
+        document.getElementById("btn-submit-vote").style.display = "block";
+      }
+    });
+  });
 
-        // Add selected class to clicked option
-        e.target.classList.add("selected");
-        selectedClass = e.target.getAttribute("data-value");
-
-        if (elements.selectedClassInput) {
-          elements.selectedClassInput.value = selectedClass;
-        }
-
-        // Tampilkan tombol submit jika nama sudah diisi
-        if (elements.voterNameInput && elements.submitBtn) {
-          const voterName = elements.voterNameInput.value.trim();
-          if (voterName && selectedClass) {
-            elements.submitBtn.style.display = "block";
-          }
-        }
+  // Real-time validation untuk nama pemilih
+  const voterNameInput = document.getElementById("voter-name");
+  if (voterNameInput) {
+    voterNameInput.addEventListener("input", function () {
+      const name = this.value.trim();
+      if (name && selectedClass) {
+        document.getElementById("btn-submit-vote").style.display = "block";
+      } else {
+        document.getElementById("btn-submit-vote").style.display = "none";
       }
     });
   }
 
-  // Real-time validation for nama pemilih - OPTIMIZED with debounce
-  if (elements.voterNameInput && elements.submitBtn) {
-    let inputTimeout;
-    elements.voterNameInput.addEventListener("input", function () {
-      clearTimeout(inputTimeout);
-      inputTimeout = setTimeout(() => {
-        const name = this.value.trim();
-        if (name && selectedClass) {
-          elements.submitBtn.style.display = "block";
-        } else {
-          elements.submitBtn.style.display = "none";
-        }
-      }, 150); // Debounce for 150ms
-    });
-  }
-
   // Submit Vote
-  if (elements.submitBtn) {
-    elements.submitBtn.addEventListener("click", submitVote);
+  const submitBtn = document.getElementById("btn-submit-vote");
+  if (submitBtn) {
+    submitBtn.addEventListener("click", submitVote);
   }
 
   // Skip Vote
-  if (elements.skipBtn) {
-    elements.skipBtn.addEventListener("click", skipVote);
+  const skipBtn = document.getElementById("btn-skip-vote");
+  if (skipBtn) {
+    skipBtn.addEventListener("click", skipVote);
   }
 
   console.log("✅ Voting system setup complete");
@@ -695,13 +585,8 @@ function setupVotingSystem() {
 // 8. Load semua paslon - DIPERBAIKI
 async function loadAllPaslon() {
   try {
-    // Filter hanya paslon aktif - OPTIMIZED with single loop
-    const activeCandidates = [];
-    for (let i = 0; i < candidates.length; i++) {
-      if (candidates[i].status === "active") {
-        activeCandidates.push(candidates[i]);
-      }
-    }
+    // Filter hanya paslon aktif
+    const activeCandidates = candidates.filter((c) => c.status === "active");
 
     if (activeCandidates.length === 0) {
       console.log("Tidak ada paslon aktif");
@@ -713,15 +598,12 @@ async function loadAllPaslon() {
       return;
     }
 
-    // Kelompokkan paslon berdasarkan organisasi - OPTIMIZED
-    const paslonByOrg = { best: [], dps: [], pmr: [] };
-
-    for (let i = 0; i < activeCandidates.length; i++) {
-      const candidate = activeCandidates[i];
-      if (paslonByOrg[candidate.org]) {
-        paslonByOrg[candidate.org].push(candidate);
-      }
-    }
+    // Kelompokkan paslon berdasarkan organisasi
+    const paslonByOrg = {
+      best: activeCandidates.filter((c) => c.org === "best"),
+      dps: activeCandidates.filter((c) => c.org === "dps"),
+      pmr: activeCandidates.filter((c) => c.org === "pmr"),
+    };
 
     const container = document.getElementById("paslon-container");
     if (!container) {
@@ -729,22 +611,19 @@ async function loadAllPaslon() {
       return;
     }
 
-    // Cache DOM elements to avoid repeated queries during rendering
-    const orgMap = {
-      best: { name: "BEST", color: "var(--purple)" },
-      dps: { name: "DPS", color: "var(--orange)" },
-      pmr: { name: "PMR", color: "var(--pink)" }
-    };
-
     let html = "";
 
     // Loop untuk setiap organisasi
-    for (const [org, orgCandidates] of Object.entries(paslonByOrg)) {
-      if (orgCandidates.length === 0) continue;
+    Object.entries(paslonByOrg).forEach(([org, orgCandidates]) => {
+      if (orgCandidates.length === 0) return;
 
-      const orgInfo = orgMap[org];
-      const orgName = orgInfo.name;
-      const orgColor = orgInfo.color;
+      const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
+      const orgColor =
+        org === "best"
+          ? "var(--purple)"
+          : org === "dps"
+            ? "var(--orange)"
+            : "var(--pink)";
 
       // Ambil logo organisasi
       const orgLogo = logos[org];
@@ -770,83 +649,83 @@ async function loadAllPaslon() {
       } else {
         html += '<div class="candidates-grid">';
 
-        for (let i = 0; i < orgCandidates.length; i++) {
-          const paslon = orgCandidates[i];
+        orgCandidates.forEach((paslon) => {
           const isSelected = selectedPaslon[org] === paslon.id;
-
-          // OPTIMIZED: Precompute values to avoid repeated checks
-          const visiText = paslon.visi && paslon.visi.trim() !== ""
-            ? paslon.visi
-            : '<span style="color: var(--gray); font-style: italic;">Belum ada visi</span>';
-          const misiText = paslon.misi && paslon.misi.trim() !== ""
-            ? paslon.misi
-            : '<span style="color: var(--gray); font-style: italic;">Belum ada misi</span>';
-          const fotoHtml = paslon.foto
-            ? `<img src="${paslon.foto}" alt="${paslon.ketua}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 4rem;\\'>👥</div>';">`
-            : `<div style="font-size: 4rem;">👥</div>`;
+          const visiText =
+            paslon.visi && paslon.visi.trim() !== ""
+              ? paslon.visi
+              : '<span style="color: var(--gray); font-style: italic;">Belum ada visi</span>';
+          const misiText =
+            paslon.misi && paslon.misi.trim() !== ""
+              ? paslon.misi
+              : '<span style="color: var(--gray); font-style: italic;">Belum ada misi</span>';
 
           html += `
                             <div class="candidate-card ${isSelected ? "selected" : ""}" data-id="${paslon.id}" data-org="${org}">
                                 <div class="candidate-photo">
-                                    ${fotoHtml}
+                                    ${
+                                      paslon.foto
+                                        ? `<img src="${paslon.foto}" alt="${paslon.ketua}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 4rem;\\'>👥</div>';">`
+                                        : `<div style="font-size: 4rem;">👥</div>`
+                                    }
                                 </div>
                                 <div class="candidate-info">
                                     <div class="candidate-name">${paslon.ketua} & ${paslon.wakil}</div>
                                     <div class="candidate-vision">"${visiText}"</div>
                                     <div class="candidate-mission">${misiText}</div>
-                                    <button class="btn ${isSelected ? "btn-success" : "btn-primary"} select-paslon-btn"
-                                            data-id="${paslon.id}"
-                                            data-org="${org}"
+                                    <button class="btn ${isSelected ? "btn-success" : "btn-primary"} select-paslon-btn" 
+                                            data-id="${paslon.id}" 
+                                            data-org="${org}" 
                                             style="width: 100%; margin-top: 15px;">
                                         ${isSelected ? "✅ Telah Dipilih" : "✅ Pilih Paslon Ini"}
                                     </button>
                                 </div>
                             </div>
                         `;
-        }
+        });
 
         html += "</div>";
       }
 
       html += `</div>`;
-    }
+    });
 
     container.innerHTML =
       html ||
       '<p style="text-align: center; padding: 30px; color: var(--gray);">Belum ada data paslon.</p>';
 
-    // OPTIMIZED: Use event delegation for paslon selection
-    container.addEventListener('click', function(e) {
-      if (e.target.classList.contains('select-paslon-btn')) {
+    // Event listener untuk pilihan paslon
+    document.querySelectorAll(".select-paslon-btn").forEach((btn) => {
+      btn.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
 
-        const paslonId = e.target.getAttribute("data-id");
-        const org = e.target.getAttribute("data-org");
+        const paslonId = this.getAttribute("data-id");
+        const org = this.getAttribute("data-org");
 
         console.log(`Memilih paslon: ${paslonId} untuk organisasi: ${org}`);
 
         // Simpan pilihan
         selectedPaslon[org] = paslonId;
 
-        // Update tampilan - OPTIMIZED with cached selectors
-        const orgCards = container.querySelectorAll(`.candidate-card[data-org="${org}"]`);
-        for (let i = 0; i < orgCards.length; i++) {
-          const card = orgCards[i];
-          card.classList.remove("selected");
-          const btn = card.querySelector(".select-paslon-btn");
-          if (btn) {
-            btn.classList.remove("btn-success");
-            btn.classList.add("btn-primary");
-            btn.textContent = "✅ Pilih Paslon Ini";
-          }
-        }
+        // Update tampilan
+        document
+          .querySelectorAll(`.candidate-card[data-org="${org}"]`)
+          .forEach((card) => {
+            card.classList.remove("selected");
+            const btn = card.querySelector(".select-paslon-btn");
+            if (btn) {
+              btn.classList.remove("btn-success");
+              btn.classList.add("btn-primary");
+              btn.textContent = "✅ Pilih Paslon Ini";
+            }
+          });
 
         // Tandai paslon yang dipilih
-        e.target.classList.remove("btn-primary");
-        e.target.classList.add("btn-success");
-        e.target.textContent = "✅ Telah Dipilih";
-        e.target.closest(".candidate-card").classList.add("selected");
+        this.classList.remove("btn-primary");
+        this.classList.add("btn-success");
+        this.textContent = "✅ Telah Dipilih";
+        this.closest(".candidate-card").classList.add("selected");
 
         // Update tombol submit
         updateSubmitButton();
@@ -871,7 +750,7 @@ async function loadAllPaslon() {
             });
           }
         }
-      }
+      });
     });
 
     // Update tombol submit
@@ -887,10 +766,8 @@ function updateSubmitButton() {
   const submitBtn = document.getElementById("btn-submit-vote");
   if (!submitBtn) return;
 
-  // OPTIMIZED: Count selected organizations more efficiently
-  const orgCount = (selectedPaslon.best ? 1 : 0) +
-                   (selectedPaslon.dps ? 1 : 0) +
-                   (selectedPaslon.pmr ? 1 : 0);
+  const orgs = ["best", "dps", "pmr"];
+  const orgCount = orgs.filter((org) => selectedPaslon[org]).length;
 
   if (orgCount === 3) {
     submitBtn.disabled = false;
@@ -901,7 +778,7 @@ function updateSubmitButton() {
   }
 }
 
-// 10. Submit Vote ke Supabase - OPTIMIZED
+// 10. Submit Vote ke Supabase - DIPERBAIKI
 async function submitVote() {
   console.log("Submitting vote...");
 
@@ -932,7 +809,7 @@ async function submitVote() {
     return;
   }
 
-  // Cek apakah sudah voting - Gunakan array lokal untuk performa
+  // Cek apakah sudah voting
   const alreadyVoted = votes.some(
     (vote) =>
       vote.nama.toLowerCase() === voterName.toLowerCase() &&
@@ -964,7 +841,7 @@ async function submitVote() {
   showLoading("Mengirim suara Anda ke server...");
 
   try {
-    // 1. Simpan vote ke Supabase
+    // 1. Simpan vote ke Supabase (CRITICAL)
     const { data, error } = await supabase
       .from("votes")
       .insert([
@@ -979,10 +856,27 @@ async function submitVote() {
 
     if (error) throw error;
 
-    // OPTIMIZATION: Kita tidak perlu lagi mengupdate kolom 'votes' di tabel 'candidates' 
-    // karena loadQuickResults sekarang menghitung suara langsung dari baris di tabel 'votes'.
-    // Ini menghilangkan 3 write requests per satu kali voting!
-    
+    // 2. Update vote count (NON-BLOCKING / PARALLEL)
+    // Kita gunakan Promise.all agar lebih cepat, dan tidak membatalkan vote jika ini gagal sebagian
+    const updatePromises = Object.entries(selectedPaslon).map(
+      async ([org, paslonId]) => {
+        const paslon = candidates.find((c) => c.id === paslonId);
+        if (paslon) {
+          const newVoteCount = (paslon.votes || 0) + 1;
+          return supabase
+            .from("candidates")
+            .update({ votes: newVoteCount })
+            .eq("id", paslonId);
+        }
+      },
+    );
+
+    // Tunggu semua update selesai (opsional: bisa di-await atau dibiarkan background jika ingin sangat cepat)
+    // Kita await tapi dengan catch individual agar tidak throw error ke main block
+    await Promise.all(updatePromises).catch((err) =>
+      console.warn("Warning: Gagal update counter paslon", err),
+    );
+
     // Sembunyikan loading
     hideLoading();
 
@@ -1009,6 +903,7 @@ async function submitVote() {
       "❌ Gagal menyimpan suara: " + (error.message || "Koneksi bermasalah"),
     );
 
+    // Enable tombol lagi jika gagal
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = "✅ Kirim Semua Suara (3/3 dipilih)";
@@ -1053,8 +948,9 @@ async function skipVote() {
 
     if (error) throw error;
 
-    // Realtime subscription akan mengupdate data secara otomatis
-    
+    // Refresh data
+    await loadDataFromSupabase();
+
     hideLoading();
     resetVoteForm();
     showMessage(
@@ -1109,59 +1005,47 @@ async function loadResults() {
     const container = document.getElementById("results-container");
     if (!container) return;
 
-    // Hitung statistik - OPTIMIZED with single loop
-    let validVotes = 0;
-    let absentVotes = 0;
-    for (let i = 0; i < votes.length; i++) {
-      if (votes[i].status === "voted") {
-        validVotes++;
-      } else if (votes[i].status === "absent") {
-        absentVotes++;
-      }
-    }
+    // Hitung statistik
     const totalVotes = votes.length;
+    const validVotes = votes.filter((v) => v.status === "voted").length;
+    const absentVotes = votes.filter((v) => v.status === "absent").length;
 
     // Update statistik
-    const elements = {
-      resultsTotal: document.getElementById("results-total"),
-      resultsValid: document.getElementById("results-valid"),
-      resultsAbsent: document.getElementById("results-absent")
+    const resultsTotal = document.getElementById("results-total");
+    const resultsValid = document.getElementById("results-valid");
+    const resultsAbsent = document.getElementById("results-absent");
+
+    if (resultsTotal) resultsTotal.textContent = totalVotes;
+    if (resultsValid) resultsValid.textContent = validVotes;
+    if (resultsAbsent) resultsAbsent.textContent = absentVotes;
+
+    // Kelompokkan berdasarkan organisasi
+    const resultsByOrg = {
+      best: [],
+      dps: [],
+      pmr: [],
     };
 
-    if (elements.resultsTotal) elements.resultsTotal.textContent = totalVotes;
-    if (elements.resultsValid) elements.resultsValid.textContent = validVotes;
-    if (elements.resultsAbsent) elements.resultsAbsent.textContent = absentVotes;
-
-    // Kelompokkan berdasarkan organisasi - OPTIMIZED
-    const resultsByOrg = { best: [], dps: [], pmr: [] };
-
-    for (let i = 0; i < candidates.length; i++) {
-      const paslon = candidates[i];
-      if (paslon.status === "active" && resultsByOrg[paslon.org]) {
+    candidates.forEach((paslon) => {
+      if (paslon.status === "active") {
         resultsByOrg[paslon.org].push(paslon);
       }
-    }
-
-    // Cache DOM elements to avoid repeated queries during rendering
-    const orgMap = {
-      best: { name: "BEST", color: "var(--purple)" },
-      dps: { name: "DPS", color: "var(--orange)" },
-      pmr: { name: "PMR", color: "var(--pink)" }
-    };
+    });
 
     let html = "";
 
-    // OPTIMIZED: Use for...of loop instead of forEach
-    for (const [org, orgCandidates] of Object.entries(resultsByOrg)) {
-      if (orgCandidates.length === 0) continue;
+    Object.entries(resultsByOrg).forEach(([org, orgCandidates]) => {
+      if (orgCandidates.length === 0) return;
 
-      const orgInfo = orgMap[org];
-      const orgName = orgInfo.name;
-      const orgColor = orgInfo.color;
+      const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
+      const orgColor =
+        org === "best"
+          ? "var(--purple)"
+          : org === "dps"
+            ? "var(--orange)"
+            : "var(--pink)";
 
       const orgLogo = logos[org];
-
-      // OPTIMIZED: Sort once and cache
       orgCandidates.sort((a, b) => b.votes - a.votes);
 
       html += `
@@ -1172,10 +1056,9 @@ async function loadResults() {
                         </div>
                 `;
 
-      // OPTIMIZED: Use for loop instead of forEach
-      for (let i = 0; i < orgCandidates.length; i++) {
-        const paslon = orgCandidates[i];
-        const percentage = validVotes > 0 ? Math.round((paslon.votes / validVotes) * 100) : 0;
+      orgCandidates.forEach((paslon) => {
+        const percentage =
+          validVotes > 0 ? Math.round((paslon.votes / validVotes) * 100) : 0;
 
         html += `
                         <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 10px;">
@@ -1191,10 +1074,10 @@ async function loadResults() {
                             </div>
                         </div>
                     `;
-      }
+      });
 
       html += `</div>`;
-    }
+    });
 
     container.innerHTML = html || "<p>Belum ada data hasil.</p>";
   } catch (error) {
@@ -1234,41 +1117,57 @@ async function loadAdminVotes() {
       return;
     }
 
-    // Urutan kelas yang benar - OPTIMIZED: Use Map for faster lookup
+    // Urutan kelas yang benar
     const classOrder = [
-      "10-1", "10-2", "10-3", "10-4", "10-5",
-      "11-1", "11-2", "11-3", "11-4", "11-5",
-      "12-1", "12-2", "12-3", "12-4", "12-5",
-      "Guru", "Staff"
+      "10-1",
+      "10-2",
+      "10-3",
+      "10-4",
+      "10-5",
+      "11-1",
+      "11-2",
+      "11-3",
+      "11-4",
+      "11-5",
+      "12-1",
+      "12-2",
+      "12-3",
+      "12-4",
+      "12-5",
+      "Guru",
+      "Staff",
     ];
 
-    // OPTIMIZED: Use Map for faster lookup and initialization
-    const votesByClass = new Map();
-    for (const className of classOrder) {
-      votesByClass.set(className, []);
-    }
+    // Kelompokkan data berdasarkan kelas
+    const votesByClass = {};
 
-    // OPTIMIZED: Single loop for grouping
-    for (let i = 0; i < votesData.length; i++) {
-      const vote = votesData[i];
+    // Inisialisasi struktur untuk semua kelas
+    classOrder.forEach((className) => {
+      votesByClass[className] = [];
+    });
+
+    // Kelompokkan data
+    votesData.forEach((vote) => {
       const kelas = vote.kelas || "Unassigned";
-      if (votesByClass.has(kelas)) {
-        votesByClass.get(kelas).push(vote);
+      if (votesByClass[kelas]) {
+        votesByClass[kelas].push(vote);
       } else {
-        votesByClass.set(kelas, [vote]);
+        votesByClass[kelas] = [vote];
       }
-    }
+    });
 
-    // OPTIMIZED: Sort data within each class
-    for (const [kelas, votesArray] of votesByClass) {
-      votesArray.sort((a, b) => a.nama.localeCompare(b.nama));
-    }
+    // Urutkan data dalam setiap kelas berdasarkan nama
+    Object.keys(votesByClass).forEach((kelas) => {
+      votesByClass[kelas].sort((a, b) => {
+        return a.nama.localeCompare(b.nama);
+      });
+    });
 
     let html = "";
 
-    // OPTIMIZED: Use for...of instead of forEach for better performance
-    for (const className of classOrder) {
-      const classVotes = votesByClass.get(className);
+    // Tampilkan data per kelas sesuai urutan
+    classOrder.forEach((className) => {
+      const classVotes = votesByClass[className];
 
       if (classVotes && classVotes.length > 0) {
         html += `
@@ -1289,9 +1188,7 @@ async function loadAdminVotes() {
                                     <tbody>
                     `;
 
-        // OPTIMIZED: Use for loop instead of forEach
-        for (let i = 0; i < classVotes.length; i++) {
-          const vote = classVotes[i];
+        classVotes.forEach((vote, index) => {
           const date = new Date(vote.created_at);
           const timeString = date.toLocaleTimeString("id-ID", {
             hour: "2-digit",
@@ -1301,14 +1198,14 @@ async function loadAdminVotes() {
           });
 
           html += `
-                            <tr style="border-bottom: 1px solid #eee; ${i % 2 === 0 ? "background: #f9f9f9;" : ""}">
-                                <td style="padding: 10px; text-align: center; font-weight: bold;">${i + 1}</td>
+                            <tr style="border-bottom: 1px solid #eee; ${index % 2 === 0 ? "background: #f9f9f9;" : ""}">
+                                <td style="padding: 10px; text-align: center; font-weight: bold;">${index + 1}</td>
                                 <td style="padding: 10px;">
                                     <strong>${vote.nama}</strong><br>
                                     <small style="color: var(--gray);">${className}</small>
                                 </td>
                                 <td style="padding: 10px;">
-                                    <span style="display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+                                    <span style="display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; 
                                           background: ${vote.status === "voted" ? "var(--success)" : "var(--warning)"}; color: white;">
                                         ${vote.status === "voted" ? "✅ Sudah Voting" : "⏭️ Tidak Hadir"}
                                     </span>
@@ -1318,7 +1215,7 @@ async function loadAdminVotes() {
                                 </td>
                             </tr>
                         `;
-        }
+        });
 
         html += `
                                     </tbody>
@@ -1327,18 +1224,7 @@ async function loadAdminVotes() {
                         </div>
                     `;
       }
-    }
-
-    // OPTIMIZED: Calculate totals once and reuse
-    let totalVoted = 0;
-    let totalAbsent = 0;
-    for (let i = 0; i < votesData.length; i++) {
-      if (votesData[i].status === "voted") {
-        totalVoted++;
-      } else if (votesData[i].status === "absent") {
-        totalAbsent++;
-      }
-    }
+    });
 
     // Tampilkan total keseluruhan
     html += `
@@ -1350,11 +1236,11 @@ async function loadAdminVotes() {
                             <div>Total Data</div>
                         </div>
                         <div>
-                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">${totalVoted}</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">${votesData.filter((v) => v.status === "voted").length}</div>
                             <div>Sudah Voting</div>
                         </div>
                         <div>
-                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning);">${totalAbsent}</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning);">${votesData.filter((v) => v.status === "absent").length}</div>
                             <div>Tidak Hadir</div>
                         </div>
                     </div>
