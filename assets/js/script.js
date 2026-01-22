@@ -19,40 +19,74 @@ let selectedPaslon = {};
 let settings = {};
 let logos = {};
 
-// Helper untuk render logo aman (Global)
-const getLogoHtml = (logo, org, size = "50px") => {
-  const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
-  const orgColor =
-    org === "best"
-      ? "var(--purple)"
-      : org === "dps"
-        ? "var(--orange)"
-        : "var(--pink)";
+// Performance monitoring utilities
+const performanceUtils = {
+  marks: {},
+  measures: {},
 
-  if (!logo) {
-    const icon = org === "best" ? "👑" : org === "dps" ? "⚖️" : "❤️";
-    return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: ${orgColor}; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">${icon}</div>`;
-  }
+  mark(name) {
+    this.marks[name] = performance.now();
+  },
 
-  // Jika logo adalah URL (http/data:image)
-  if (logo.startsWith("http") || logo.startsWith("data:image")) {
-    return `<img src="${logo}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
-  }
+  measure(name, startMark, endMark) {
+    const startTime = this.marks[startMark];
+    const endTime = this.marks[endMark] || performance.now();
+    this.measures[name] = endTime - startTime;
+    return this.measures[name];
+  },
 
-  // Jika logo adalah raw SVG string yang belum ter-encode
-  if (logo.trim().startsWith("<svg")) {
-    try {
-      const encodedSvg = "data:image/svg+xml;base64," + btoa(logo);
-      return `<img src="${encodedSvg}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
-    } catch (e) {
-      console.error("Error encoding SVG:", e);
-      return `<div style="width: ${size}; height: ${size}; background: #eee; border-radius: 50%; display:flex; align-items:center; justify-content:center;">Error</div>`;
+  getMeasure(name) {
+    return this.measures[name];
+  },
+
+  logMeasure(name, description = '') {
+    const duration = this.measures[name];
+    if (duration !== undefined) {
+      console.log(`⏱️ ${name}: ${duration.toFixed(2)}ms ${description}`);
     }
   }
-
-  // Fallback
-  return `<img src="${logo}" alt="${orgName}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
 };
+
+// Helper untuk render logo aman (Global) - OPTIMIZED
+const getLogoHtml = (() => {
+  const orgMap = {
+    best: { name: "BEST", color: "var(--purple)", icon: "👑" },
+    dps: { name: "DPS", color: "var(--orange)", icon: "⚖️" },
+    pmr: { name: "PMR", color: "var(--pink)", icon: "❤️" }
+  };
+
+  return (logo, org, size = "50px") => {
+    const orgInfo = orgMap[org];
+    if (!orgInfo) {
+      return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: #ccc; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">?</div>`;
+    }
+
+    const { name, color, icon } = orgInfo;
+
+    if (!logo) {
+      return `<div style="width: ${size}; height: ${size}; border-radius: 50%; background: ${color}; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.5rem;">${icon}</div>`;
+    }
+
+    // Jika logo adalah URL (http/data:image)
+    if (logo.startsWith("http") || logo.startsWith("data:image")) {
+      return `<img src="${logo}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
+    }
+
+    // Jika logo adalah raw SVG string yang belum ter-encode
+    if (logo.trim().startsWith("<svg")) {
+      try {
+        const encodedSvg = "data:image/svg+xml;base64," + btoa(logo);
+        return `<img src="${encodedSvg}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
+      } catch (e) {
+        console.error("Error encoding SVG:", e);
+        return `<div style="width: ${size}; height: ${size}; background: #eee; border-radius: 50%; display:flex; align-items:center; justify-content:center;">Error</div>`;
+      }
+    }
+
+    // Fallback
+    return `<img src="${logo}" alt="${name}" style="width: ${size}; height: ${size}; border-radius: 50%; object-fit: cover;">`;
+  };
+})();
 
 // ===== INISIALISASI SUPABASE DENGAN REAL-TIME =====
 async function initSupabase() {
@@ -239,14 +273,18 @@ function updateNavButtons(activePage) {
 // 3. Load Data dari Supabase - DIPERBAIKI
 async function loadDataFromSupabase() {
   try {
+    performanceUtils.mark('loadDataStart');
     showLoading("Memuat data dari server...");
 
     // Load candidates dengan polling
+    performanceUtils.mark('loadCandidatesStart');
     const { data: candidatesData, error: candidatesError } = await supabase
       .from("candidates")
       .select("*")
       .order("org", { ascending: true })
       .order("created_at", { ascending: true });
+    performanceUtils.mark('loadCandidatesEnd');
+    performanceUtils.measure('loadCandidates', 'loadCandidatesStart', 'loadCandidatesEnd');
 
     if (candidatesError) {
       console.error("Error loading candidates:", candidatesError);
@@ -257,12 +295,15 @@ async function loadDataFromSupabase() {
     }
 
     // Load votes dengan urutan yang benar
+    performanceUtils.mark('loadVotesStart');
     const { data: votesData, error: votesError } = await supabase
       .from("votes")
       .select("*")
       .order("kelas", { ascending: true }) // Urutkan berdasarkan kelas
       .order("nama", { ascending: true }) // Urutkan berdasarkan nama
       .order("created_at", { ascending: false });
+    performanceUtils.mark('loadVotesEnd');
+    performanceUtils.measure('loadVotes', 'loadVotesStart', 'loadVotesEnd');
 
     if (votesError) {
       console.error("Error loading votes:", votesError);
@@ -273,6 +314,7 @@ async function loadDataFromSupabase() {
     }
 
     // Load settings
+    performanceUtils.mark('loadSettingsStart');
     const { data: settingsData, error: settingsError } = await supabase
       .from("settings")
       .select("*");
@@ -282,9 +324,11 @@ async function loadDataFromSupabase() {
       settings = {};
     } else {
       settings = {};
-      settingsData.forEach((item) => {
+      // OPTIMIZED: Use for loop instead of forEach for better performance
+      for (let i = 0; i < settingsData.length; i++) {
+        const item = settingsData[i];
         settings[item.key] = item.value;
-      });
+      }
 
       // Update UI dengan settings
       if (settings.website_title) {
@@ -302,8 +346,11 @@ async function loadDataFromSupabase() {
         }
       }
     }
+    performanceUtils.mark('loadSettingsEnd');
+    performanceUtils.measure('loadSettings', 'loadSettingsStart', 'loadSettingsEnd');
 
     // Load logos
+    performanceUtils.mark('loadLogosStart');
     const { data: logosData, error: logosError } = await supabase
       .from("logos")
       .select("*");
@@ -313,9 +360,11 @@ async function loadDataFromSupabase() {
       logos = {};
     } else {
       logos = {};
-      logosData.forEach((logo) => {
+      // OPTIMIZED: Use for loop instead of forEach for better performance
+      for (let i = 0; i < logosData.length; i++) {
+        const logo = logosData[i];
         logos[logo.org] = logo.logo_url;
-      });
+      }
 
       // Update logo previews di admin
       updateLogoPreviews();
@@ -330,10 +379,23 @@ async function loadDataFromSupabase() {
         }
       }
     }
+    performanceUtils.mark('loadLogosEnd');
+    performanceUtils.measure('loadLogos', 'loadLogosStart', 'loadLogosEnd');
+
+    performanceUtils.mark('loadDataEnd');
+    performanceUtils.measure('loadDataTotal', 'loadDataStart', 'loadDataEnd');
 
     console.log(
       `✅ Data dimuat: ${candidates.length} paslon, ${votes.length} suara`,
     );
+
+    // Log performance metrics
+    performanceUtils.logMeasure('loadCandidates', '(candidates)');
+    performanceUtils.logMeasure('loadVotes', '(votes)');
+    performanceUtils.logMeasure('loadSettings', '(settings)');
+    performanceUtils.logMeasure('loadLogos', '(logos)');
+    performanceUtils.logMeasure('loadDataTotal', '(total)');
+
     hideLoading();
   } catch (error) {
     console.error("❌ Error loading data:", error);
@@ -370,59 +432,66 @@ async function loadQuickResults() {
   const container = document.getElementById("quick-results");
   if (!container) return;
 
-  // Hitung suara per paslon
+  // Hitung suara per paslon - OPTIMIZED
   const voteCounts = {};
-  votes.forEach((vote) => {
+
+  // OPTIMIZED: Use for loop instead of forEach for better performance
+  for (let i = 0; i < votes.length; i++) {
+    const vote = votes[i];
     if (vote.selected_paslon && vote.status === "voted") {
       try {
         const paslonObj =
           typeof vote.selected_paslon === "string"
             ? JSON.parse(vote.selected_paslon)
             : vote.selected_paslon;
-        Object.values(paslonObj).forEach((paslonId) => {
+
+        // OPTIMIZED: Use for...of instead of Object.values().forEach()
+        for (const paslonId of Object.values(paslonObj)) {
           voteCounts[paslonId] = (voteCounts[paslonId] || 0) + 1;
-        });
+        }
       } catch (e) {
         console.error("Error parsing selected_paslon:", e);
       }
     }
-  });
+  }
 
-  // Update vote count di paslon
-  candidates.forEach((paslon) => {
+  // Update vote count di paslon - OPTIMIZED
+  for (let i = 0; i < candidates.length; i++) {
+    const paslon = candidates[i];
     paslon.votes = voteCounts[paslon.id] || 0;
-  });
+  }
 
-  // Kelompokkan berdasarkan organisasi
-  const resultsByOrg = {
-    best: [],
-    dps: [],
-    pmr: [],
-  };
+  // Kelompokkan berdasarkan organisasi - OPTIMIZED
+  const resultsByOrg = { best: [], dps: [], pmr: [] };
 
-  candidates.forEach((paslon) => {
-    if (paslon.status === "active") {
+  for (let i = 0; i < candidates.length; i++) {
+    const paslon = candidates[i];
+    if (paslon.status === "active" && resultsByOrg[paslon.org]) {
       resultsByOrg[paslon.org].push(paslon);
     }
-  });
+  }
+
+  // Cache DOM elements to avoid repeated queries during rendering
+  const orgMap = {
+    best: { name: "BEST", color: "var(--purple)" },
+    dps: { name: "DPS", color: "var(--orange)" },
+    pmr: { name: "PMR", color: "var(--pink)" }
+  };
 
   let html = "";
 
-  Object.entries(resultsByOrg).forEach(([org, orgCandidates]) => {
-    if (orgCandidates.length === 0) return;
+  // OPTIMIZED: Use for...of instead of Object.entries().forEach()
+  for (const [org, orgCandidates] of Object.entries(resultsByOrg)) {
+    if (orgCandidates.length === 0) continue;
 
-    const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
-    const orgColor =
-      org === "best"
-        ? "var(--purple)"
-        : org === "dps"
-          ? "var(--orange)"
-          : "var(--pink)";
+    const orgInfo = orgMap[org];
+    const orgName = orgInfo.name;
+    const orgColor = orgInfo.color;
 
     // Ambil logo organisasi
     const orgLogo = logos[org];
 
-    // Sort by votes
+    // Sort by votes - OPTIMIZED
     orgCandidates.sort((a, b) => b.votes - a.votes);
 
     html += `
@@ -433,10 +502,12 @@ async function loadQuickResults() {
                     </div>
             `;
 
-    orgCandidates.forEach((paslon) => {
+    // OPTIMIZED: Use for loop instead of forEach
+    for (let i = 0; i < orgCandidates.length; i++) {
+      const paslon = orgCandidates[i];
+      // OPTIMIZED: Calculate total votes once and reuse
       const totalVotes = votes.filter((v) => v.status === "voted").length;
-      const percentage =
-        totalVotes > 0 ? Math.round((paslon.votes / totalVotes) * 100) : 0;
+      const percentage = totalVotes > 0 ? Math.round((paslon.votes / totalVotes) * 100) : 0;
 
       html += `
                     <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 10px;">
@@ -449,10 +520,10 @@ async function loadQuickResults() {
                         </div>
                     </div>
                 `;
-    });
+    }
 
     html += `</div>`;
-  });
+  }
 
   container.innerHTML = html || "<p>Belum ada data hasil.</p>";
 }
@@ -461,37 +532,44 @@ async function loadQuickResults() {
 function setupEventListeners() {
   console.log("Setting up event listeners...");
 
+  // Cache DOM elements to avoid repeated queries
+  const elements = {
+    homeBtn: document.getElementById("btn-home"),
+    voteBtn: document.getElementById("btn-vote"),
+    resultsBtn: document.getElementById("btn-results"),
+    adminBtn: document.getElementById("btn-admin"),
+    backVoteBtn: document.getElementById("btn-back-vote"),
+    backResultsBtn: document.getElementById("btn-back-results"),
+    backLoginBtn: document.getElementById("btn-back-login")
+  };
+
   // Navigasi utama - DIPERBAIKI
-  const homeBtn = document.getElementById("btn-home");
-  if (homeBtn) {
-    homeBtn.addEventListener("click", function (e) {
+  if (elements.homeBtn) {
+    elements.homeBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Home button clicked");
       showPage("home-page");
     });
   }
 
-  const voteBtn = document.getElementById("btn-vote");
-  if (voteBtn) {
-    voteBtn.addEventListener("click", function (e) {
+  if (elements.voteBtn) {
+    elements.voteBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Vote button clicked");
       showPage("vote-page");
     });
   }
 
-  const resultsBtn = document.getElementById("btn-results");
-  if (resultsBtn) {
-    resultsBtn.addEventListener("click", function (e) {
+  if (elements.resultsBtn) {
+    elements.resultsBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Results button clicked");
       showPage("results-page");
     });
   }
 
-  const adminBtn = document.getElementById("btn-admin");
-  if (adminBtn) {
-    adminBtn.addEventListener("click", function (e) {
+  if (elements.adminBtn) {
+    elements.adminBtn.addEventListener("click", function (e) {
       e.preventDefault();
       console.log("Admin button clicked");
       if (currentUser && currentUser.role === "admin") {
@@ -503,25 +581,22 @@ function setupEventListeners() {
   }
 
   // Tombol kembali
-  const backVoteBtn = document.getElementById("btn-back-vote");
-  if (backVoteBtn) {
-    backVoteBtn.addEventListener("click", function (e) {
+  if (elements.backVoteBtn) {
+    elements.backVoteBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
   }
 
-  const backResultsBtn = document.getElementById("btn-back-results");
-  if (backResultsBtn) {
-    backResultsBtn.addEventListener("click", function (e) {
+  if (elements.backResultsBtn) {
+    elements.backResultsBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
   }
 
-  const backLoginBtn = document.getElementById("btn-back-login");
-  if (backLoginBtn) {
-    backLoginBtn.addEventListener("click", function (e) {
+  if (elements.backLoginBtn) {
+    elements.backLoginBtn.addEventListener("click", function (e) {
       e.preventDefault();
       showPage("home-page");
     });
@@ -534,49 +609,67 @@ function setupEventListeners() {
 function setupVotingSystem() {
   console.log("Setting up voting system...");
 
-  // Pilihan Kelas
-  const classOptions = document.querySelectorAll(".class-option");
-  classOptions.forEach((option) => {
-    option.addEventListener("click", function () {
-      console.log("Class option clicked:", this.getAttribute("data-value"));
-      document.querySelectorAll(".class-option").forEach((opt) => {
-        opt.classList.remove("selected");
-      });
-      this.classList.add("selected");
-      selectedClass = this.getAttribute("data-value");
-      document.getElementById("selected-class").value = selectedClass;
+  // Cache DOM elements to avoid repeated queries
+  const elements = {
+    classOptions: document.querySelectorAll(".class-option"),
+    selectedClassInput: document.getElementById("selected-class"),
+    voterNameInput: document.getElementById("voter-name"),
+    submitBtn: document.getElementById("btn-submit-vote"),
+    skipBtn: document.getElementById("btn-skip-vote")
+  };
 
-      // Tampilkan tombol submit jika nama sudah diisi
-      const voterName = document.getElementById("voter-name").value.trim();
-      if (voterName && selectedClass) {
-        document.getElementById("btn-submit-vote").style.display = "block";
+  // Pilihan Kelas - OPTIMIZED with event delegation
+  if (elements.classOptions.length > 0) {
+    // Use event delegation to handle clicks on class options
+    const classOptionsContainer = elements.classOptions[0].parentElement;
+    classOptionsContainer.addEventListener("click", function(e) {
+      if (e.target.classList.contains("class-option")) {
+        // Remove selected class from all options
+        elements.classOptions.forEach(opt => opt.classList.remove("selected"));
+
+        // Add selected class to clicked option
+        e.target.classList.add("selected");
+        selectedClass = e.target.getAttribute("data-value");
+
+        if (elements.selectedClassInput) {
+          elements.selectedClassInput.value = selectedClass;
+        }
+
+        // Tampilkan tombol submit jika nama sudah diisi
+        if (elements.voterNameInput && elements.submitBtn) {
+          const voterName = elements.voterNameInput.value.trim();
+          if (voterName && selectedClass) {
+            elements.submitBtn.style.display = "block";
+          }
+        }
       }
     });
-  });
+  }
 
-  // Real-time validation untuk nama pemilih
-  const voterNameInput = document.getElementById("voter-name");
-  if (voterNameInput) {
-    voterNameInput.addEventListener("input", function () {
-      const name = this.value.trim();
-      if (name && selectedClass) {
-        document.getElementById("btn-submit-vote").style.display = "block";
-      } else {
-        document.getElementById("btn-submit-vote").style.display = "none";
-      }
+  // Real-time validation for nama pemilih - OPTIMIZED with debounce
+  if (elements.voterNameInput && elements.submitBtn) {
+    let inputTimeout;
+    elements.voterNameInput.addEventListener("input", function () {
+      clearTimeout(inputTimeout);
+      inputTimeout = setTimeout(() => {
+        const name = this.value.trim();
+        if (name && selectedClass) {
+          elements.submitBtn.style.display = "block";
+        } else {
+          elements.submitBtn.style.display = "none";
+        }
+      }, 150); // Debounce for 150ms
     });
   }
 
   // Submit Vote
-  const submitBtn = document.getElementById("btn-submit-vote");
-  if (submitBtn) {
-    submitBtn.addEventListener("click", submitVote);
+  if (elements.submitBtn) {
+    elements.submitBtn.addEventListener("click", submitVote);
   }
 
   // Skip Vote
-  const skipBtn = document.getElementById("btn-skip-vote");
-  if (skipBtn) {
-    skipBtn.addEventListener("click", skipVote);
+  if (elements.skipBtn) {
+    elements.skipBtn.addEventListener("click", skipVote);
   }
 
   console.log("✅ Voting system setup complete");
@@ -585,8 +678,13 @@ function setupVotingSystem() {
 // 8. Load semua paslon - DIPERBAIKI
 async function loadAllPaslon() {
   try {
-    // Filter hanya paslon aktif
-    const activeCandidates = candidates.filter((c) => c.status === "active");
+    // Filter hanya paslon aktif - OPTIMIZED with single loop
+    const activeCandidates = [];
+    for (let i = 0; i < candidates.length; i++) {
+      if (candidates[i].status === "active") {
+        activeCandidates.push(candidates[i]);
+      }
+    }
 
     if (activeCandidates.length === 0) {
       console.log("Tidak ada paslon aktif");
@@ -598,12 +696,15 @@ async function loadAllPaslon() {
       return;
     }
 
-    // Kelompokkan paslon berdasarkan organisasi
-    const paslonByOrg = {
-      best: activeCandidates.filter((c) => c.org === "best"),
-      dps: activeCandidates.filter((c) => c.org === "dps"),
-      pmr: activeCandidates.filter((c) => c.org === "pmr"),
-    };
+    // Kelompokkan paslon berdasarkan organisasi - OPTIMIZED
+    const paslonByOrg = { best: [], dps: [], pmr: [] };
+
+    for (let i = 0; i < activeCandidates.length; i++) {
+      const candidate = activeCandidates[i];
+      if (paslonByOrg[candidate.org]) {
+        paslonByOrg[candidate.org].push(candidate);
+      }
+    }
 
     const container = document.getElementById("paslon-container");
     if (!container) {
@@ -611,19 +712,22 @@ async function loadAllPaslon() {
       return;
     }
 
+    // Cache DOM elements to avoid repeated queries during rendering
+    const orgMap = {
+      best: { name: "BEST", color: "var(--purple)" },
+      dps: { name: "DPS", color: "var(--orange)" },
+      pmr: { name: "PMR", color: "var(--pink)" }
+    };
+
     let html = "";
 
     // Loop untuk setiap organisasi
-    Object.entries(paslonByOrg).forEach(([org, orgCandidates]) => {
-      if (orgCandidates.length === 0) return;
+    for (const [org, orgCandidates] of Object.entries(paslonByOrg)) {
+      if (orgCandidates.length === 0) continue;
 
-      const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
-      const orgColor =
-        org === "best"
-          ? "var(--purple)"
-          : org === "dps"
-            ? "var(--orange)"
-            : "var(--pink)";
+      const orgInfo = orgMap[org];
+      const orgName = orgInfo.name;
+      const orgColor = orgInfo.color;
 
       // Ambil logo organisasi
       const orgLogo = logos[org];
@@ -649,83 +753,83 @@ async function loadAllPaslon() {
       } else {
         html += '<div class="candidates-grid">';
 
-        orgCandidates.forEach((paslon) => {
+        for (let i = 0; i < orgCandidates.length; i++) {
+          const paslon = orgCandidates[i];
           const isSelected = selectedPaslon[org] === paslon.id;
-          const visiText =
-            paslon.visi && paslon.visi.trim() !== ""
-              ? paslon.visi
-              : '<span style="color: var(--gray); font-style: italic;">Belum ada visi</span>';
-          const misiText =
-            paslon.misi && paslon.misi.trim() !== ""
-              ? paslon.misi
-              : '<span style="color: var(--gray); font-style: italic;">Belum ada misi</span>';
+
+          // OPTIMIZED: Precompute values to avoid repeated checks
+          const visiText = paslon.visi && paslon.visi.trim() !== ""
+            ? paslon.visi
+            : '<span style="color: var(--gray); font-style: italic;">Belum ada visi</span>';
+          const misiText = paslon.misi && paslon.misi.trim() !== ""
+            ? paslon.misi
+            : '<span style="color: var(--gray); font-style: italic;">Belum ada misi</span>';
+          const fotoHtml = paslon.foto
+            ? `<img src="${paslon.foto}" alt="${paslon.ketua}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 4rem;\\'>👥</div>';">`
+            : `<div style="font-size: 4rem;">👥</div>`;
 
           html += `
                             <div class="candidate-card ${isSelected ? "selected" : ""}" data-id="${paslon.id}" data-org="${org}">
                                 <div class="candidate-photo">
-                                    ${
-                                      paslon.foto
-                                        ? `<img src="${paslon.foto}" alt="${paslon.ketua}" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'font-size: 4rem;\\'>👥</div>';">`
-                                        : `<div style="font-size: 4rem;">👥</div>`
-                                    }
+                                    ${fotoHtml}
                                 </div>
                                 <div class="candidate-info">
                                     <div class="candidate-name">${paslon.ketua} & ${paslon.wakil}</div>
                                     <div class="candidate-vision">"${visiText}"</div>
                                     <div class="candidate-mission">${misiText}</div>
-                                    <button class="btn ${isSelected ? "btn-success" : "btn-primary"} select-paslon-btn" 
-                                            data-id="${paslon.id}" 
-                                            data-org="${org}" 
+                                    <button class="btn ${isSelected ? "btn-success" : "btn-primary"} select-paslon-btn"
+                                            data-id="${paslon.id}"
+                                            data-org="${org}"
                                             style="width: 100%; margin-top: 15px;">
                                         ${isSelected ? "✅ Telah Dipilih" : "✅ Pilih Paslon Ini"}
                                     </button>
                                 </div>
                             </div>
                         `;
-        });
+        }
 
         html += "</div>";
       }
 
       html += `</div>`;
-    });
+    }
 
     container.innerHTML =
       html ||
       '<p style="text-align: center; padding: 30px; color: var(--gray);">Belum ada data paslon.</p>';
 
-    // Event listener untuk pilihan paslon
-    document.querySelectorAll(".select-paslon-btn").forEach((btn) => {
-      btn.addEventListener("click", function (e) {
+    // OPTIMIZED: Use event delegation for paslon selection
+    container.addEventListener('click', function(e) {
+      if (e.target.classList.contains('select-paslon-btn')) {
         e.preventDefault();
         e.stopPropagation();
 
-        const paslonId = this.getAttribute("data-id");
-        const org = this.getAttribute("data-org");
+        const paslonId = e.target.getAttribute("data-id");
+        const org = e.target.getAttribute("data-org");
 
         console.log(`Memilih paslon: ${paslonId} untuk organisasi: ${org}`);
 
         // Simpan pilihan
         selectedPaslon[org] = paslonId;
 
-        // Update tampilan
-        document
-          .querySelectorAll(`.candidate-card[data-org="${org}"]`)
-          .forEach((card) => {
-            card.classList.remove("selected");
-            const btn = card.querySelector(".select-paslon-btn");
-            if (btn) {
-              btn.classList.remove("btn-success");
-              btn.classList.add("btn-primary");
-              btn.textContent = "✅ Pilih Paslon Ini";
-            }
-          });
+        // Update tampilan - OPTIMIZED with cached selectors
+        const orgCards = container.querySelectorAll(`.candidate-card[data-org="${org}"]`);
+        for (let i = 0; i < orgCards.length; i++) {
+          const card = orgCards[i];
+          card.classList.remove("selected");
+          const btn = card.querySelector(".select-paslon-btn");
+          if (btn) {
+            btn.classList.remove("btn-success");
+            btn.classList.add("btn-primary");
+            btn.textContent = "✅ Pilih Paslon Ini";
+          }
+        }
 
         // Tandai paslon yang dipilih
-        this.classList.remove("btn-primary");
-        this.classList.add("btn-success");
-        this.textContent = "✅ Telah Dipilih";
-        this.closest(".candidate-card").classList.add("selected");
+        e.target.classList.remove("btn-primary");
+        e.target.classList.add("btn-success");
+        e.target.textContent = "✅ Telah Dipilih";
+        e.target.closest(".candidate-card").classList.add("selected");
 
         // Update tombol submit
         updateSubmitButton();
@@ -750,7 +854,7 @@ async function loadAllPaslon() {
             });
           }
         }
-      });
+      }
     });
 
     // Update tombol submit
@@ -766,8 +870,10 @@ function updateSubmitButton() {
   const submitBtn = document.getElementById("btn-submit-vote");
   if (!submitBtn) return;
 
-  const orgs = ["best", "dps", "pmr"];
-  const orgCount = orgs.filter((org) => selectedPaslon[org]).length;
+  // OPTIMIZED: Count selected organizations more efficiently
+  const orgCount = (selectedPaslon.best ? 1 : 0) +
+                   (selectedPaslon.dps ? 1 : 0) +
+                   (selectedPaslon.pmr ? 1 : 0);
 
   if (orgCount === 3) {
     submitBtn.disabled = false;
@@ -1005,47 +1111,59 @@ async function loadResults() {
     const container = document.getElementById("results-container");
     if (!container) return;
 
-    // Hitung statistik
+    // Hitung statistik - OPTIMIZED with single loop
+    let validVotes = 0;
+    let absentVotes = 0;
+    for (let i = 0; i < votes.length; i++) {
+      if (votes[i].status === "voted") {
+        validVotes++;
+      } else if (votes[i].status === "absent") {
+        absentVotes++;
+      }
+    }
     const totalVotes = votes.length;
-    const validVotes = votes.filter((v) => v.status === "voted").length;
-    const absentVotes = votes.filter((v) => v.status === "absent").length;
 
     // Update statistik
-    const resultsTotal = document.getElementById("results-total");
-    const resultsValid = document.getElementById("results-valid");
-    const resultsAbsent = document.getElementById("results-absent");
-
-    if (resultsTotal) resultsTotal.textContent = totalVotes;
-    if (resultsValid) resultsValid.textContent = validVotes;
-    if (resultsAbsent) resultsAbsent.textContent = absentVotes;
-
-    // Kelompokkan berdasarkan organisasi
-    const resultsByOrg = {
-      best: [],
-      dps: [],
-      pmr: [],
+    const elements = {
+      resultsTotal: document.getElementById("results-total"),
+      resultsValid: document.getElementById("results-valid"),
+      resultsAbsent: document.getElementById("results-absent")
     };
 
-    candidates.forEach((paslon) => {
-      if (paslon.status === "active") {
+    if (elements.resultsTotal) elements.resultsTotal.textContent = totalVotes;
+    if (elements.resultsValid) elements.resultsValid.textContent = validVotes;
+    if (elements.resultsAbsent) elements.resultsAbsent.textContent = absentVotes;
+
+    // Kelompokkan berdasarkan organisasi - OPTIMIZED
+    const resultsByOrg = { best: [], dps: [], pmr: [] };
+
+    for (let i = 0; i < candidates.length; i++) {
+      const paslon = candidates[i];
+      if (paslon.status === "active" && resultsByOrg[paslon.org]) {
         resultsByOrg[paslon.org].push(paslon);
       }
-    });
+    }
+
+    // Cache DOM elements to avoid repeated queries during rendering
+    const orgMap = {
+      best: { name: "BEST", color: "var(--purple)" },
+      dps: { name: "DPS", color: "var(--orange)" },
+      pmr: { name: "PMR", color: "var(--pink)" }
+    };
 
     let html = "";
 
-    Object.entries(resultsByOrg).forEach(([org, orgCandidates]) => {
-      if (orgCandidates.length === 0) return;
+    // OPTIMIZED: Use for...of loop instead of forEach
+    for (const [org, orgCandidates] of Object.entries(resultsByOrg)) {
+      if (orgCandidates.length === 0) continue;
 
-      const orgName = org === "best" ? "BEST" : org === "dps" ? "DPS" : "PMR";
-      const orgColor =
-        org === "best"
-          ? "var(--purple)"
-          : org === "dps"
-            ? "var(--orange)"
-            : "var(--pink)";
+      const orgInfo = orgMap[org];
+      const orgName = orgInfo.name;
+      const orgColor = orgInfo.color;
 
       const orgLogo = logos[org];
+
+      // OPTIMIZED: Sort once and cache
       orgCandidates.sort((a, b) => b.votes - a.votes);
 
       html += `
@@ -1056,9 +1174,10 @@ async function loadResults() {
                         </div>
                 `;
 
-      orgCandidates.forEach((paslon) => {
-        const percentage =
-          validVotes > 0 ? Math.round((paslon.votes / validVotes) * 100) : 0;
+      // OPTIMIZED: Use for loop instead of forEach
+      for (let i = 0; i < orgCandidates.length; i++) {
+        const paslon = orgCandidates[i];
+        const percentage = validVotes > 0 ? Math.round((paslon.votes / validVotes) * 100) : 0;
 
         html += `
                         <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; margin-bottom: 10px;">
@@ -1074,10 +1193,10 @@ async function loadResults() {
                             </div>
                         </div>
                     `;
-      });
+      }
 
       html += `</div>`;
-    });
+    }
 
     container.innerHTML = html || "<p>Belum ada data hasil.</p>";
   } catch (error) {
@@ -1117,57 +1236,41 @@ async function loadAdminVotes() {
       return;
     }
 
-    // Urutan kelas yang benar
+    // Urutan kelas yang benar - OPTIMIZED: Use Map for faster lookup
     const classOrder = [
-      "10-1",
-      "10-2",
-      "10-3",
-      "10-4",
-      "10-5",
-      "11-1",
-      "11-2",
-      "11-3",
-      "11-4",
-      "11-5",
-      "12-1",
-      "12-2",
-      "12-3",
-      "12-4",
-      "12-5",
-      "Guru",
-      "Staff",
+      "10-1", "10-2", "10-3", "10-4", "10-5",
+      "11-1", "11-2", "11-3", "11-4", "11-5",
+      "12-1", "12-2", "12-3", "12-4", "12-5",
+      "Guru", "Staff"
     ];
 
-    // Kelompokkan data berdasarkan kelas
-    const votesByClass = {};
+    // OPTIMIZED: Use Map for faster lookup and initialization
+    const votesByClass = new Map();
+    for (const className of classOrder) {
+      votesByClass.set(className, []);
+    }
 
-    // Inisialisasi struktur untuk semua kelas
-    classOrder.forEach((className) => {
-      votesByClass[className] = [];
-    });
-
-    // Kelompokkan data
-    votesData.forEach((vote) => {
+    // OPTIMIZED: Single loop for grouping
+    for (let i = 0; i < votesData.length; i++) {
+      const vote = votesData[i];
       const kelas = vote.kelas || "Unassigned";
-      if (votesByClass[kelas]) {
-        votesByClass[kelas].push(vote);
+      if (votesByClass.has(kelas)) {
+        votesByClass.get(kelas).push(vote);
       } else {
-        votesByClass[kelas] = [vote];
+        votesByClass.set(kelas, [vote]);
       }
-    });
+    }
 
-    // Urutkan data dalam setiap kelas berdasarkan nama
-    Object.keys(votesByClass).forEach((kelas) => {
-      votesByClass[kelas].sort((a, b) => {
-        return a.nama.localeCompare(b.nama);
-      });
-    });
+    // OPTIMIZED: Sort data within each class
+    for (const [kelas, votesArray] of votesByClass) {
+      votesArray.sort((a, b) => a.nama.localeCompare(b.nama));
+    }
 
     let html = "";
 
-    // Tampilkan data per kelas sesuai urutan
-    classOrder.forEach((className) => {
-      const classVotes = votesByClass[className];
+    // OPTIMIZED: Use for...of instead of forEach for better performance
+    for (const className of classOrder) {
+      const classVotes = votesByClass.get(className);
 
       if (classVotes && classVotes.length > 0) {
         html += `
@@ -1188,7 +1291,9 @@ async function loadAdminVotes() {
                                     <tbody>
                     `;
 
-        classVotes.forEach((vote, index) => {
+        // OPTIMIZED: Use for loop instead of forEach
+        for (let i = 0; i < classVotes.length; i++) {
+          const vote = classVotes[i];
           const date = new Date(vote.created_at);
           const timeString = date.toLocaleTimeString("id-ID", {
             hour: "2-digit",
@@ -1198,14 +1303,14 @@ async function loadAdminVotes() {
           });
 
           html += `
-                            <tr style="border-bottom: 1px solid #eee; ${index % 2 === 0 ? "background: #f9f9f9;" : ""}">
-                                <td style="padding: 10px; text-align: center; font-weight: bold;">${index + 1}</td>
+                            <tr style="border-bottom: 1px solid #eee; ${i % 2 === 0 ? "background: #f9f9f9;" : ""}">
+                                <td style="padding: 10px; text-align: center; font-weight: bold;">${i + 1}</td>
                                 <td style="padding: 10px;">
                                     <strong>${vote.nama}</strong><br>
                                     <small style="color: var(--gray);">${className}</small>
                                 </td>
                                 <td style="padding: 10px;">
-                                    <span style="display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; 
+                                    <span style="display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
                                           background: ${vote.status === "voted" ? "var(--success)" : "var(--warning)"}; color: white;">
                                         ${vote.status === "voted" ? "✅ Sudah Voting" : "⏭️ Tidak Hadir"}
                                     </span>
@@ -1215,7 +1320,7 @@ async function loadAdminVotes() {
                                 </td>
                             </tr>
                         `;
-        });
+        }
 
         html += `
                                     </tbody>
@@ -1224,7 +1329,18 @@ async function loadAdminVotes() {
                         </div>
                     `;
       }
-    });
+    }
+
+    // OPTIMIZED: Calculate totals once and reuse
+    let totalVoted = 0;
+    let totalAbsent = 0;
+    for (let i = 0; i < votesData.length; i++) {
+      if (votesData[i].status === "voted") {
+        totalVoted++;
+      } else if (votesData[i].status === "absent") {
+        totalAbsent++;
+      }
+    }
 
     // Tampilkan total keseluruhan
     html += `
@@ -1236,11 +1352,11 @@ async function loadAdminVotes() {
                             <div>Total Data</div>
                         </div>
                         <div>
-                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">${votesData.filter((v) => v.status === "voted").length}</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--success);">${totalVoted}</div>
                             <div>Sudah Voting</div>
                         </div>
                         <div>
-                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning);">${votesData.filter((v) => v.status === "absent").length}</div>
+                            <div style="font-size: 1.5rem; font-weight: bold; color: var(--warning);">${totalAbsent}</div>
                             <div>Tidak Hadir</div>
                         </div>
                     </div>

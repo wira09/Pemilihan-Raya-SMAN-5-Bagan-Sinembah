@@ -26,6 +26,10 @@ body {
   color: var(--dark);
   min-height: 100vh;
   line-height: 1.5;
+  /* OPTIMIZED: Improve rendering performance */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 /* ===== LAYOUT UTAMA ===== */
@@ -226,9 +230,10 @@ header {
   padding: 25px;
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
   margin-bottom: 25px;
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
+  /* OPTIMIZED: Use transform and opacity for better performance */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  /* OPTIMIZED: Enable hardware acceleration */
+  will-change: transform;
 }
 
 .card:hover {
@@ -248,13 +253,16 @@ header {
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s ease;
+  /* OPTIMIZED: Use transform and opacity for better performance */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   text-decoration: none;
   user-select: none;
   touch-action: manipulation;
   min-height: 45px;
   min-width: 45px;
   position: relative;
+  /* OPTIMIZED: Enable hardware acceleration */
+  will-change: transform;
 }
 
 .btn-primary {
@@ -284,6 +292,7 @@ header {
 }
 
 .btn:hover {
+  /* OPTIMIZED: Use transform instead of changing layout properties */
   transform: translateY(-3px);
   box-shadow: 0 7px 15px rgba(0, 0, 0, 0.15);
 }
@@ -412,15 +421,19 @@ textarea.form-control {
   border-radius: 15px;
   overflow: hidden;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-  transition: all 0.3s ease;
+  /* OPTIMIZED: Use transform and opacity for better performance */
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
   border: 2px solid transparent;
+  /* OPTIMIZED: Enable hardware acceleration */
+  will-change: transform;
 }
 
 .candidate-card.selected {
   border-color: var(--success) !important;
   box-shadow: 0 8px 25px rgba(39, 174, 96, 0.2) !important;
   transform: translateY(-3px);
-  transition: all 0.3s ease;
+  /* OPTIMIZED: Use the same transition as base class */
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .candidate-photo {
@@ -488,8 +501,11 @@ textarea.form-control {
 .select-paslon-btn.btn-success {
   background: var(--success) !important;
   color: white !important;
+  /* OPTIMIZED: Use transform instead of changing layout properties */
   transform: scale(1.02);
   box-shadow: 0 5px 15px rgba(39, 174, 96, 0.3);
+  /* OPTIMIZED: Use the same transition as base class */
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 /* ===== HASIL PEMILIHAN ===== */
@@ -657,6 +673,8 @@ textarea.form-control {
   align-items: center;
   z-index: 99999;
   flex-direction: column;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translateZ(0);
 }
 
 .loading-overlay.active {
@@ -669,6 +687,8 @@ textarea.form-control {
   height: 60px;
   position: relative;
   margin-bottom: 20px;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translateZ(0);
 }
 
 .spinner-circle {
@@ -677,7 +697,10 @@ textarea.form-control {
   border: 4px solid rgba(255, 255, 255, 0.2);
   border-top: 4px solid var(--primary);
   border-radius: 50%;
+  /* OPTIMIZED: Use transform and opacity for better performance */
   animation: spin 1s linear infinite;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translateZ(0);
 }
 
 .spinner-inner {
@@ -690,7 +713,10 @@ textarea.form-control {
   border: 3px solid transparent;
   border-top: 3px solid var(--secondary);
   border-radius: 50%;
+  /* OPTIMIZED: Use transform and opacity for better performance */
   animation: spin-reverse 1.5s linear infinite;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translate(-50%, -50%) translateZ(0);
 }
 
 .loading-bar {
@@ -700,14 +726,19 @@ textarea.form-control {
   border-radius: 2px;
   overflow: hidden;
   margin-bottom: 15px;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translateZ(0);
 }
 
 .loading-bar-fill {
   width: 100%;
   height: 100%;
   background: linear-gradient(90deg, var(--primary), var(--secondary));
+  /* OPTIMIZED: Use transform and opacity for better performance */
   animation: loading-bar 2s ease-in-out infinite;
   transform-origin: left;
+  /* OPTIMIZED: Enable hardware acceleration */
+  transform: translateX(-100%) translateZ(0);
 }
 
 .loading-text {
@@ -729,35 +760,38 @@ textarea.form-control {
 
 @keyframes spin {
   0% {
-    transform: rotate(0deg);
+    /* OPTIMIZED: Use transform for better performance */
+    transform: rotate(0deg) translateZ(0);
   }
 
   100% {
-    transform: rotate(360deg);
+    transform: rotate(360deg) translateZ(0);
   }
 }
 
 @keyframes spin-reverse {
   0% {
-    transform: translate(-50%, -50%) rotate(0deg);
+    /* OPTIMIZED: Use transform for better performance */
+    transform: translate(-50%, -50%) rotate(0deg) translateZ(0);
   }
 
   100% {
-    transform: translate(-50%, -50%) rotate(-360deg);
+    transform: translate(-50%, -50%) rotate(-360deg) translateZ(0);
   }
 }
 
 @keyframes loading-bar {
   0% {
-    transform: translateX(-100%);
+    /* OPTIMIZED: Use transform for better performance */
+    transform: translateX(-100%) translateZ(0);
   }
 
   50% {
-    transform: translateX(0%);
+    transform: translateX(0%) translateZ(0);
   }
 
   100% {
-    transform: translateX(100%);
+    transform: translateX(100%) translateZ(0);
   }
 }
 
